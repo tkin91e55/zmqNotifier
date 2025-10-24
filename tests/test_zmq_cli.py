@@ -1,3 +1,4 @@
+# ruff: noqa
 import csv
 import lzma
 import unittest
@@ -84,17 +85,20 @@ class TestZMQMT4(unittest.TestCase):
         pass
 
 from unittest.mock import patch
+
 from zmqNotifier.csv_logger import DataLogger
+
 
 @patch('zmqNotifier.csv_logger.DATA_PATH', Path('./zmqNotifier/test_data'))
 class TestDataLogger(unittest.TestCase):
-
     """
     Test basic functions of DataLogger, API is supposed to be used like:
+
     logger = DataLogger(proxy, symbol, tf)
     logger.log(utc_dt,data) # repeat... and knows to log rotate zips
     logger.close() # at the end of the program
     """
+
     TEST_DATA_PATH = Path('./zmqNotifier/test_data')
 
     # Mock proxy object for DataLogger
@@ -152,7 +156,6 @@ class TestDataLogger(unittest.TestCase):
 
     def test_new_file_hanlder(self):
         """Test creating a new file handler."""
-
         L = DataLogger(self.mock_proxy, self.test_symbol, 'tick')
         test_date = '2025-10-10'
         fd = L._new_file_handler(test_date)

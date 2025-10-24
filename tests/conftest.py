@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from agentic_py.core.agent_registry import AgentRegistry
 from agentic_py.models.agent_profile import AgentProfile
 
