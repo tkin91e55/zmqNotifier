@@ -39,9 +39,15 @@ class StorageSettings(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    data_path: Path = Field(Path("./data"), description="Root path for persisted market data.")
-    backend: StorageBackend = Field(StorageBackend.CSV, description="Active storage backend.")
-    compression_enabled: bool = Field(True, description="Enable compression for stored data.")
+    data_path: Path = Field(
+        default=Path("./data"), description="Root path for persisted market data.",
+    )
+    backend: StorageBackend = Field(
+        default=StorageBackend.CSV, description="Active storage backend.",
+    )
+    compression_enabled: bool = Field(
+        default=True, description="Enable compression for stored data.",
+    )
 
 
 class DataValidationSettings(BaseModel):
@@ -77,11 +83,14 @@ class NotificationSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     telegram_bot_token: str | None = Field(
-        default=None, description="Telegram bot token (if Telegram notifications are used).",
+        default=None,
+        description="Telegram bot token (if Telegram notifications are used).",
     )
     telegram_chat_id: str | None = Field(
-        default=None, description="Telegram chat to receive notifications.",
+        default=None,
+        description="Telegram chat to receive notifications.",
     )
+
 
 class AppSettings(BaseSettings):
     """Application settings with environment variable support."""
@@ -101,7 +110,7 @@ class AppSettings(BaseSettings):
     validation: DataValidationSettings = Field(default_factory=DataValidationSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
     auto_create_dirs: bool = Field(
-        True,
+        default=True,
         description="Create required directories automatically on settings load.",
     )
 

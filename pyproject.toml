@@ -133,8 +133,8 @@ line-ending = "auto"
 force-single-line = true
 
 [tool.ruff.lint.per-file-ignores]
-"src/DWX_ZeroMQ_Connector_v2_0_1_RC8.py" = ["ALL"]
-# "innoB/blog/**/test_models.py" = ["PT009"]
+"src/zmqNotifier/DWX_ZeroMQ_Connector_v2_0_1_RC8.py" = ["ALL"]
+"tests/**/test_*.py" = ["D103"]
 
 [tool.pylint.main]
 py-version = "3.11"

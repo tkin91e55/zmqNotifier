@@ -20,7 +20,8 @@ class TickData(BaseModel):
     def ask_must_be_greater_than_bid(cls, v, info):
         """Validate that ask price is greater than bid price."""
         if info.data.get("bid") and v <= info.data["bid"]:
-            raise ValueError("Ask price must be greater than bid price")
+            msg = "Ask price must be greater than bid price"
+            raise ValueError(msg)
         return v
 
 
@@ -40,11 +41,14 @@ class OHLCData(BaseModel):
         """Validate that high is the highest price."""
         data = info.data
         if data.get("low") and v < data["low"]:
-            raise ValueError("High must be >= low")
+            msg = "High must be >= low"
+            raise ValueError(msg)
         if data.get("open") and v < data["open"]:
-            raise ValueError("High must be >= open")
+            msg = "High must be >= open"
+            raise ValueError(msg)
         if data.get("close") and v < data["close"]:
-            raise ValueError("High must be >= close")
+            msg = "High must be >= close"
+            raise ValueError(msg)
         return v
 
     @field_validator("low")
@@ -53,11 +57,14 @@ class OHLCData(BaseModel):
         """Validate that low is the lowest price."""
         data = info.data
         if data.get("high") and v > data["high"]:
-            raise ValueError("Low must be <= high")
+            msg = "Low must be <= high"
+            raise ValueError(msg)
         if data.get("open") and v > data["open"]:
-            raise ValueError("Low must be <= open")
+            msg = "Low must be <= open"
+            raise ValueError(msg)
         if data.get("close") and v > data["close"]:
-            raise ValueError("Low must be <= close")
+            msg = "Low must be <= close"
+            raise ValueError(msg)
         return v
 
     # @validator('datetime')
@@ -65,7 +72,8 @@ class OHLCData(BaseModel):
     #     """Validate that bar data is not too old."""
     #     from .config import settings
     #     now = datetime.utcnow()
-    #     if (now - v).total_seconds() > settings.validation.tick_staleness_seconds * 60:  # Allow older for bars
+    #     max_age = settings.validation.tick_staleness_seconds * 60
+    #     if (now - v).total_seconds() > max_age:  # Allow older for bars
     #         raise ValueError(f'Bar data is too old: {v}')
     #     return v
 
@@ -82,8 +90,10 @@ class MarketDataMessage(BaseModel):
     def validate_symbol(cls, v):
         """Validate that symbol is supported."""
         from .config import settings
+
         if v not in settings.validation.supported_symbols:
-            raise ValueError(f"Unsupported symbol: {v}")
+            msg = f"Unsupported symbol: {v}"
+            raise ValueError(msg)
         return v
 
     @field_validator("timeframe")
@@ -92,6 +102,8 @@ class MarketDataMessage(BaseModel):
         """Validate timeframe format."""
         if v is not None:
             from .config import settings
+
             if v not in settings.validation.supported_timeframes:
-                raise ValueError(f"Invalid timeframe: {v}")
+                msg = f"Invalid timeframe: {v}"
+                raise ValueError(msg)
         return v
