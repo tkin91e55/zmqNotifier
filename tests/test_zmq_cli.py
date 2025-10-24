@@ -75,7 +75,7 @@ class TestZMQMT4(unittest.TestCase):
 
     @classmethod
     def setUpclass(cls):
-        from zmq_cli import ZMQ_MT4
+        from zmqNotifier.zmq_cli import ZMQ_MT4
         cls.subscriber = ZMQ_MT4()
         import pickle
         with open('zmqNotifier/data/zmq_market_db.pickle','rb') as pf:
@@ -129,11 +129,11 @@ class TestDataLogger(unittest.TestCase):
 
     def test_zip_old_logs(self):
         """Test zipping old log files."""
-        from .csv_logger import _zip_old_logs
+        from zmqNotifier.csv_logger import _zip_old_logs
 
         # Create a test directory with dummy CSV files
         test_dir = self.TEST_DATA_PATH / 'test_zip'
-        test_dir.mkdir(parents=True)
+        test_dir.mkdir(parents=True, exist_ok=True)
 
         # Create dummy CSV files
         for i in range(3):

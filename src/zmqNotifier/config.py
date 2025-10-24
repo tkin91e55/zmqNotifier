@@ -5,10 +5,14 @@ from __future__ import annotations
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import Field
+from pydantic import field_validator
+from pydantic import model_validator
+from pydantic_settings import BaseSettings
+from pydantic_settings import SettingsConfigDict
 
 
 class StorageBackend(str, Enum):
@@ -72,11 +76,11 @@ class NotificationSettings(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    telegram_bot_token: Optional[str] = Field(
-        default=None, description="Telegram bot token (if Telegram notifications are used)."
+    telegram_bot_token: str | None = Field(
+        default=None, description="Telegram bot token (if Telegram notifications are used).",
     )
-    telegram_chat_id: Optional[str] = Field(
-        default=None, description="Telegram chat to receive notifications."
+    telegram_chat_id: str | None = Field(
+        default=None, description="Telegram chat to receive notifications.",
     )
 
 class AppSettings(BaseSettings):

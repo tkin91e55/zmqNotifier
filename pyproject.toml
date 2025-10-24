@@ -1,11 +1,11 @@
 [tool.poetry]
 name = "zmqNotifier"
 version = "0.1.0"
-description = ""
+description = "ZeroMQ-based financial data receiver and notification system"
 authors = ["tkin91e55 <tkingkwun@gmail.com>"]
 readme = "README.md"
-# packages = [{ include = "agentic_py", from = "src" }]
-package-mode = false
+packages = [{ include = "zmqNotifier", from="src" }]
+package-mode = true
 license = "MIT"
 
 [tool.poetry.dependencies]

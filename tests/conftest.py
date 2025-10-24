@@ -1,20 +1,13 @@
 """Shared pytest fixtures."""
-
-from __future__ import annotations
-
 import pytest
-from agentic_py.core.agent_registry import AgentRegistry
-from agentic_py.models.agent_profile import AgentProfile
+from zmqNotifier import config as app_config
 
 
-@pytest.fixture()
-def registry_with_sample_agents() -> AgentRegistry:
-    """Provide a registry populated with sample agent profiles."""
-    registry = AgentRegistry()
-    registry.register(
-        AgentProfile(identifier="agent-alpha", display_name="Agent Alpha"),
-    )
-    registry.register(
-        AgentProfile(identifier="agent-beta", display_name="Agent Beta"),
-    )
-    return registry
+@pytest.fixture(autouse=True)
+def reset_app_settings():
+    """Ensure tests operate on a fresh settings instance."""
+    app_config.get_settings.cache_clear()
+    app_config.settings = app_config.get_settings()
+    yield
+    app_config.get_settings.cache_clear()
+    app_config.settings = app_config.get_settings()
