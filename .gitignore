@@ -1,21 +1,37 @@
-.tags
-*.pyc
-*.pdf
-*.exe
-ait38/
+# Environment
+.env
+.venv/
 
+# Python cache
+__pycache__/
+*.py[cod]
+*.pickle
+
+# Coverage and test artifacts
+.coverage
+htmlcov/
+coverage.xml
+.pytest_cache/
+
+# Build outputs
+build/
+dist/
+docs/build/
+
+# Binaries
+*.zip
+*.rar
+*.7z
+*.lnk
+*.xz
+*.csv
+*.ex4
 Thumbs.db
 *.gif
 *.htm
 *.png
 
-*.zip
-*.rar
-*.7z
-*.lnk
-
-*.xz
-*.csv
-*.ex4
-
-*.pickle
+# IDE
+.idea/
+.vscode/
+.tags

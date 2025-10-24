@@ -1,22 +1,79 @@
 [tool.poetry]
-name = "mtrader-pipeline"
+name = "zmqNotifier"
 version = "0.1.0"
 description = ""
 authors = ["tkin91e55 <tkingkwun@gmail.com>"]
 readme = "README.md"
+# packages = [{ include = "agentic_py", from = "src" }]
 package-mode = false
+license = "MIT"
 
 [tool.poetry.dependencies]
 python = "~3.11"
-pytest = "8.3.5"
-lxml = "4.9.2"
-ipython = "^9.0.2"
-cssselect = "^1.3.0"
-zmq = "^0.0.0"
-pyzmq = "^27.1.0"
-pandas = "^2.3.2"
+python-dotenv = "^1.0.1"
 
+[tool.poetry.group.dev.dependencies]
+mypy = "^1.10.0"
+ruff = "^0.5.5"
+pylint = "^3.2.5"
+pre-commit = "^3.7.1"
+pydocstringformatter = "^0.7.2"
+sphinx = "^7.3.7"
+pytest = "~8.0"
+coverage = "^7.6.0"
+tox = "^4.15.0"
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_return_any = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+strict_optional = true
+pretty = true
+show_error_codes = true
+namespace_packages = true
+plugins = ["pydantic.mypy"]
+
+[tool.ruff]
+line-length = 89
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+extend-select = ["D","B", "C4", "I", "N", "S", "W", "TID252"]
+ignore = ["S101","D105", "D107", "D203", "D212", "E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pylint.main]
+py-version = "3.11"
+load-plugins = ["pylint.extensions.docparams"]
+
+[tool.pylint.messages_control]
+disable = [
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "missing-module-docstring",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["agentic_py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.pydocstringformatter]
+style = "pep257" # or 'numpydoc', need plugin if using 'google'
+write = true
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=1.8.0"]
 build-backend = "poetry.core.masonry.api"
