@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "mtrader-pipeline"
+version = "0.1.0"
+description = ""
+authors = ["tkin91e55 <tkingkwun@gmail.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "~3.11"
+pytest = "8.3.5"
+lxml = "4.9.2"
+ipython = "^9.0.2"
+cssselect = "^1.3.0"
+zmq = "^0.0.0"
+pyzmq = "^27.1.0"
+pandas = "^2.3.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
