@@ -40,16 +40,99 @@ namespace_packages = true
 plugins = ["pydantic.mypy"]
 
 [tool.ruff]
-line-length = 89
+line-length = 100
+indent-width = 4
 target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-extend-select = ["D","B", "C4", "I", "N", "S", "W", "TID252"]
-ignore = ["S101","D105", "D107", "D203", "D212", "E402"]
+# select = [
+#   "F",      # Pyflakes - basic Python errors
+#   "E",      # pycodestyle errors - PEP 8 violations
+#   "W",      # pycodestyle warnings - PEP 8 style issues
+#   "C90",    # mccabe - complexity checking
+#   "I",      # isort - import sorting
+#   "N",      # pep8-naming - naming conventions
+#   "UP",     # pyupgrade - upgrade syntax for newer Python
+#   "YTT",    # flake8-2020 - misuse of sys.version checks
+#   # "ANN", # flake8-annotations: we should support this in the future but 100+ errors atm
+#   "ASYNC",  # flake8-async - async/await best practices
+#   "S",      # flake8-bandit - security testing
+#   "BLE",    # flake8-blind-except - catch specific exceptions
+#   "FBT",    # flake8-boolean-trap - avoid boolean function arguments
+#   "B",      # flake8-bugbear - likely bugs and design problems
+#   "A",      # flake8-builtins - avoid shadowing builtins
+#   "COM",    # flake8-commas - trailing comma enforcement
+#   "C4",     # flake8-comprehensions - better list/dict comprehensions
+#   "DTZ",    # flake8-datetimez - datetime timezone awareness
+#   "T10",    # flake8-debugger - no debugger statements
+#   "DJ",     # flake8-django - Django best practices
+#   "EM",     # flake8-errmsg - error message best practices
+#   "EXE",    # flake8-executable - shebang presence/absence
+#   "FA",     # flake8-future-annotations - future annotations usage
+#   'ISC',    # flake8-implicit-str-concat - implicit string concatenation
+#   "ICN",    # flake8-import-conventions - import naming conventions
+#   "G",      # flake8-logging-format - logging format strings
+#   'INP',    # flake8-no-pep420 - require __init__.py
+#   'PIE',    # flake8-pie - miscellaneous lints
+#   "T20",    # flake8-print - no print statements
+#   'PYI',    # flake8-pyi - type stub files
+#   'PT',     # flake8-pytest-style - pytest best practices
+#   "Q",      # flake8-quotes - consistent quote usage
+#   "RSE",    # flake8-raise - raise statement improvements
+#   "RET",    # flake8-return - return statement improvements
+#   "SLF",    # flake8-self - private member access
+#   "SLOT",   # flake8-slots - __slots__ usage
+#   "SIM",    # flake8-simplify - code simplification suggestions
+#   "TID",    # flake8-tidy-imports - import organization
+#   "TCH",    # flake8-type-checking - type checking import blocks
+#   "INT",    # flake8-gettext - internationalization
+#   # "ARG", # flake8-unused-arguments - unused function arguments
+#   "PTH",    # flake8-use-pathlib - prefer pathlib over os.path
+#   # "ERA",    # eradicate - commented-out code
+#   "PD",     # pandas-vet - pandas best practices
+#   "PGH",    # pygrep-hooks - misc regexp-based checks
+#   "PL",     # Pylint - comprehensive code quality checks
+#   "TRY",    # tryceratops - exception handling best practices
+#   "FLY",    # flynt - convert string formatting to f-strings
+#   # "NPY",  # NumPy-specific rules
+#   # "AIR",  # Airflow-specific rules
+#   "PERF",   # Perflint - performance anti-patterns
+#   # "FURB", # refurb - modernization suggestions
+#   # "LOG",  # flake8-logging - logging best practices
+#   "RUF"     # Ruff-specific rules
+# ]
+extend-select = [
+  "D",      # pydocstyle - docstring conventions
+  "B",      # flake8-bugbear (extended)
+  "C4",     # flake8-comprehensions (extended)
+  "I",      # isort (extended)
+  "N",      # pep8-naming (extended)
+  "S",      # flake8-bandit (extended)
+  "W",      # pycodestyle warnings (extended)
+  "TID252"  # Banned imports
+]
+ignore = [
+  "S101",   # Allow assert statements (needed for tests)
+  "D105",   # Missing docstring in magic method
+  "D107",   # Missing docstring in __init__
+  "D203",   # 1 blank line required before class docstring (conflicts with D211)
+  "D212",   # Multi-line docstring summary should start at first line (conflicts with D213)
+  "E402"    # Module level import not at top of file
+]
 
 [tool.ruff.format]
 quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+force-single-line = true
+
+[tool.ruff.lint.per-file-ignores]
+"src/DWX_ZeroMQ_Connector_v2_0_1_RC8.py" = ["ALL"]
+# "innoB/blog/**/test_models.py" = ["PT009"]
 
 [tool.pylint.main]
 py-version = "3.11"
@@ -68,7 +151,7 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["agentic_py"]
+source = ["src"]
 
 [tool.coverage.report]
 show_missing = true
