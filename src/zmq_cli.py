@@ -2,7 +2,7 @@
 #      https://discuss.python.org/t/proper-way-to-create-a-daemon-process/79824/
 #      https://pyzmq.readthedocs.io/en/latest/howto/eventloop.html
 from datetime import datetime
-from zmqNotifier.DWX_ZeroMQ_Connector_v2_0_1_RC8 import DWX_ZeroMQ_Connector
+from DWX_ZeroMQ_Connector_v2_0_1_RC8 import DWX_ZeroMQ_Connector
 
 """
 On Dev, client side on macOS and connect to MT4 server side on Windows 10 (Parallels).
