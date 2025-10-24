@@ -1,0 +1,43 @@
+name: CI
+
+on:
+    push:
+        branches: ['main', 'develop']
+    pull_request:
+        branches: ['*']
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.11'
+
+            - name: Install Poetry
+              uses: abatilo/actions-poetry@v2
+              with:
+                  poetry-version: '1.8.3'
+
+            - name: Install dependencies
+              run: poetry install --with dev
+
+            - name: Run ruff check
+              run: poetry run ruff check src tests
+
+            - name: Run mypy
+              run: poetry run mypy src
+
+            #             - name: Run pytest with coverage
+            #               run: poetry run pytest --cov=agentic_py --cov-report=xml
+
+            - name: Run pytest with coverage
+              run: poetry run pytest
+
+            - name: Build documentation
+              run: poetry run sphinx-build docs/source docs/build
