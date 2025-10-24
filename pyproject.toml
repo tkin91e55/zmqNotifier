@@ -11,6 +11,8 @@ license = "MIT"
 [tool.poetry.dependencies]
 python = "~3.11"
 python-dotenv = "^1.0.1"
+pydantic = "^2.11.0"
+pydantic-settings = "^2.11.0"
 
 [tool.poetry.group.dev.dependencies]
 mypy = "^1.10.0"
