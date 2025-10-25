@@ -57,6 +57,7 @@ class ZmqMt4Client(DWX_ZeroMQ_Connector):
 
         # Settings
         self._verbose = True
+        self._loggers = {}
 
         logger.info("ZmqMt4Client initialized")
 
