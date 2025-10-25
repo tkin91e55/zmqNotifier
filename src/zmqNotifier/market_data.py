@@ -107,18 +107,6 @@ class MarketDataHandler:
         return messages
 
     def _parse_channel_name(self, channel: str) -> tuple[str, str | None]:
-        """
-        Parse channel name into symbol and timeframe. This is protocol from MT4 ZMQ server
-
-        Args:
-        ----
-            channel: Channel name (e.g., 'EURUSD' or 'EURUSD_M1')
-
-        Returns:
-        -------
-            Tuple of (symbol, timeframe) where timeframe is None for tick data
-
-        """
         parts = channel.split("_")
         if len(parts) == 1:
             # Tick data channel
