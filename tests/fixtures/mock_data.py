@@ -7,14 +7,15 @@ from pathlib import Path
 _PICKLE_PATH = Path(__file__).parent.parent.parent / "data" / "zmq_market_db.pickle"
 
 with _PICKLE_PATH.open("rb") as pf:
-    REAL_MARKET_DATA = pickle.load(pf)
+    REAL_MARKET_DATA = pickle.load(pf)  # noqa: S301
 
 
-def MarketDataGenerator(
+def market_data_generator(
     symbol: str = "BTCUSD",
     timeframe: str | None = None,
     batch_size: int = 1,
 ):
+    """Generate batches of market data from real pickle file."""
     channel = symbol if timeframe is None else f"{symbol}_{timeframe}"
 
     if channel not in REAL_MARKET_DATA:
@@ -30,18 +31,21 @@ def MarketDataGenerator(
         yield {channel: {k: time_tuple[k] for k in batch}}
 
 
-mock_ohlc_data = lambda symbol="BTCUSD", timeframe="M1", **kwargs: next(
-    MarketDataGenerator(symbol=symbol, timeframe=timeframe, batch_size=1)
-)
+def mock_ohlc_data(symbol: str = "BTCUSD", timeframe: str = "M1", **kwargs):
+    """Get single OHLC bar from real market data."""
+    return next(market_data_generator(symbol=symbol, timeframe=timeframe, batch_size=1))
 
-mock_tick_data = lambda symbol="BTCUSD", **kwargs: next(
-    MarketDataGenerator(symbol=symbol, timeframe=None, batch_size=1)
-)
 
-mock_multiple_ohlc = lambda symbol="BTCUSD", timeframe="M1", count=5, **kwargs: next(
-    MarketDataGenerator(symbol=symbol, timeframe=timeframe, batch_size=count)
-)
+def mock_tick_data(symbol: str = "BTCUSD", **kwargs):
+    """Get single tick from real market data."""
+    return next(market_data_generator(symbol=symbol, timeframe=None, batch_size=1))
 
-mock_multiple_ticks = lambda symbol="BTCUSD", count=5, **kwargs: next(
-    MarketDataGenerator(symbol=symbol, timeframe=None, batch_size=count)
-)
+
+def mock_multiple_ohlc(symbol: str = "BTCUSD", timeframe: str = "M1", count: int = 5, **kwargs):
+    """Get multiple OHLC bars from real market data."""
+    return next(market_data_generator(symbol=symbol, timeframe=timeframe, batch_size=count))
+
+
+def mock_multiple_ticks(symbol: str = "BTCUSD", count: int = 5, **kwargs):
+    """Get multiple ticks from real market data."""
+    return next(market_data_generator(symbol=symbol, timeframe=None, batch_size=count))

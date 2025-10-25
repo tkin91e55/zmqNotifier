@@ -1,21 +1,20 @@
+# ruff: noqa: SLF001
 """Tests for market data parsing and validation."""
 
 from decimal import Decimal
 
 import pytest
 
+from fixtures.mock_data import mock_multiple_ohlc
+from fixtures.mock_data import mock_multiple_ticks
+from fixtures.mock_data import mock_ohlc_data
+from fixtures.mock_data import mock_tick_data
 from zmqNotifier.market_data import MarketDataHandler
 from zmqNotifier.models import OHLCData
 from zmqNotifier.models import TickData
-from fixtures.mock_data import (
-    mock_multiple_ohlc,
-    mock_multiple_ticks,
-    mock_ohlc_data,
-    mock_tick_data,
-)
 
 
-@pytest.fixture
+@pytest.fixture()
 def handler():
     """Create MarketDataHandler with mock client."""
     mock_client = type("MockClient", (), {})()
@@ -29,7 +28,7 @@ class TestTickDataParsing:
         """Test parsing valid tick data."""
         raw_data = mock_tick_data()
         symbol, time_series = raw_data.popitem()
-        bid, ask = list(time_series.values())[0]
+        bid, ask = next(iter(time_series.values()))
 
         messages = handler._parse_channel(symbol, time_series)
 
@@ -43,11 +42,12 @@ class TestTickDataParsing:
 
     def test_parse_multiple_ticks(self, handler):
         """Test parsing multiple tick data points."""
-        raw_data = mock_multiple_ticks(symbol="BTCUSD", count=5)
+        expected_count = 5
+        raw_data = mock_multiple_ticks(symbol="BTCUSD", count=expected_count)
 
         messages = handler._parse_channel("BTCUSD", raw_data["BTCUSD"])
 
-        assert len(messages) == 5
+        assert len(messages) == expected_count
         for msg in messages:
             assert msg.symbol == "BTCUSD"
             assert isinstance(msg.data, TickData)
@@ -79,12 +79,13 @@ class TestOHLCDataParsing:
 
     def test_parse_multiple_ohlc_bars(self, handler):
         """Test parsing multiple OHLC bars."""
-        raw_data = mock_multiple_ohlc(symbol="BTCUSD", timeframe="M1", count=5)
+        expected_count = 5
+        raw_data = mock_multiple_ohlc(symbol="BTCUSD", timeframe="M1", count=expected_count)
         channel = "BTCUSD_M1"
 
         messages = handler._parse_channel(channel, raw_data[channel])
 
-        assert len(messages) == 5
+        assert len(messages) == expected_count
         for msg in messages:
             assert msg.symbol == "BTCUSD"
             assert msg.timeframe == "M1"
@@ -95,14 +96,14 @@ class TestOHLCDataParsing:
         raw_data = {
             "BTCUSD_M1": {
                 "2025-10-09 06:32:00.259239": (
-                    1760002260.0, # borker_time
-                    1.0850, # O
-                    1.0840, # H (invalid)
-                    1.0850, # L
-                    1.0845, # C
+                    1760002260.0,  # borker_time
+                    1.0850,  # O
+                    1.0840,  # H (invalid)
+                    1.0850,  # L
+                    1.0845,  # C
                     100.0,  # V
-                )
-            }
+                ),
+            },
         }
         channel = "BTCUSD_M1"
 
@@ -169,8 +170,8 @@ class TestTimeframeValidation:
                     1.0852,
                     100.0,
                     0,
-                )
-            }
+                ),
+            },
         }
         channel = "BTCUSD_INVALID"
 
@@ -291,8 +292,8 @@ class TestEdgeCases:
                     100.0,
                     0,
                     999,
-                )
-            }
+                ),
+            },
         }
 
         messages = handler._parse_channel("BTCUSD_M1", raw_data["BTCUSD_M1"])
