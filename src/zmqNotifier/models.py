@@ -77,6 +77,18 @@ class OHLCData(BaseModel):
     #         raise ValueError(f'Bar data is too old: {v}')
     #     return v
 
+    # TODO it was found the TF data could be invalid from MT4 server,.
+    # INVALID_COUNT_THRESHOLD = 30
+    # def is_ohlc_same(self, symbol, ohlc):
+    #     is_same = (ohlc["open"] == ohlc["high"] == ohlc["low"] == ohlc["close"])
+    #     cnt = self._invalid_count
+    #     cnt[symbol] = cnt[symbol] + 1 if is_same else 0
+    #     if cnt[symbol] > self.INVALID_COUNT_THRESHOLD:
+    #         print(f"Warning: {symbol} has {self._invalid_count[symbol]}"
+    #                 "consecutive invalid OHLC data.")
+    #         self._proxy.unsubscribe(symbol)
+
+
 
 class MarketDataMessage(BaseModel):
     """Wrapper for incoming market data messages."""

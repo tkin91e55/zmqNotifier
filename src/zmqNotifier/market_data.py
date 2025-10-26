@@ -5,13 +5,15 @@ from datetime import UTC
 from datetime import datetime
 from decimal import Decimal
 
+from .config import configure_logging
 from .config import settings
 from .models import MarketDataMessage
 from .models import OHLCData
 from .models import TickData
 
-logger = logging.getLogger(__name__)
 
+configure_logging()
+logger = logging.getLogger(__name__)
 
 # Timeframe code to minutes mapping
 TIMEFRAME_MINUTES = {
@@ -45,7 +47,7 @@ class MarketDataHandler:
 
         """
         self._client = client
-        logger.info("MarketDataHandler initialized")
+        logger.debug("MarketDataHandler initialized")
 
     def process(self, raw_data: dict) -> None:
         """
@@ -63,8 +65,16 @@ class MarketDataHandler:
         for channel, time_series in raw_data.items():
             try:
                 messages = self._parse_channel(channel, time_series)
-                # TODO this is where to deal with logger, notifiers etc
-                print(messages)
+                if not messages:
+                    logger.debug("No messages parsed for channel %s", channel)
+                    continue
+
+                for message in messages:
+                    logger.info(
+                        "Processed message from %s: %s",
+                        channel,
+                        message.model_dump(mode="json", round_trip=True),
+                    )
             except Exception:
                 logger.exception("Failed to process channel: %s", channel)
 

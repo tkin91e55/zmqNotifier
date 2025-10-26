@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+import sys
 from enum import Enum
 from functools import lru_cache
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -92,6 +95,61 @@ class NotificationSettings(BaseModel):
     )
 
 
+class LoggingSettings(BaseModel):
+    """Standard logging configuration exposed via settings."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    level: str = Field(default="INFO", description="Root logger level.")
+    fmt: str = Field(
+        default="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        description="Logging format string.",
+    )
+    datefmt: str = Field(
+        default="%Y-%m-%d %H:%M:%S",
+        description="Datetime format used in logs.",
+    )
+    log_dir: Path = Field(
+        default=Path("./logs"),
+        description="Directory for log files (relative paths resolved at runtime).",
+    )
+    file_name: str = Field(
+        default="runtime.log",
+        description="Filename for the rotating file handler.",
+    )
+    max_bytes: int = Field(
+        default=10 * 1024 * 1024,
+        description="Maximum size per log file before rotation (bytes).",
+    )
+    backup_count: int = Field(
+        default=5,
+        description="Number of rotated log files to retain.",
+    )
+    console_enabled: bool = Field(
+        default=True,
+        description="Emit logs to stdout in addition to file output.",
+    )
+    console_level: str | None = Field(
+        default=None,
+        description="Optional override for console handler level.",
+    )
+    file_level: str | None = Field(
+        default=None,
+        description="Optional override for file handler level.",
+    )
+    propagate: bool = Field(
+        default=True,
+        description="Allow package loggers to propagate to root handlers.",
+    )
+    loggers: dict[str, str] = Field(
+        default_factory=lambda: {
+            "zmqNotifier.market_data": "INFO",
+            "zmqNotifier.zmq_cli": "INFO",
+        },
+        description="Per-logger level overrides (name -> level).",
+    )
+
+
 class AppSettings(BaseSettings):
     """Application settings with environment variable support."""
 
@@ -109,6 +167,7 @@ class AppSettings(BaseSettings):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     validation: DataValidationSettings = Field(default_factory=DataValidationSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
     auto_create_dirs: bool = Field(
         default=True,
         description="Create required directories automatically on settings load.",
@@ -121,9 +180,9 @@ class AppSettings(BaseSettings):
             return self
 
         storage_path = _ensure_directory(self.storage.data_path)
-        storage = self.storage.model_copy(update={"data_path": storage_path})
+        object.__setattr__(self, 'storage', self.storage.model_copy(update={"data_path": storage_path}))
 
-        return self.model_copy(update={"storage": storage})
+        return self
 
 
 def _ensure_directory(path: Path) -> Path:
@@ -136,6 +195,91 @@ def _ensure_directory(path: Path) -> Path:
 def _resolve_path(path: Path) -> Path:
     """Convert a path to an absolute representation without touching the filesystem."""
     return path if path.is_absolute() else path.resolve()
+
+
+class StdoutStreamHandler(logging.StreamHandler):
+    """Stream handler that keeps stdout binding fresh for testing environments."""
+
+    def emit(self, record: logging.LogRecord) -> None:  # pragma: no cover - thin wrapper
+        self.stream = sys.stdout
+        super().emit(record)
+
+
+_LOGGING_CONFIGURED = False
+_ACTIVE_LOGGING_SETTINGS: LoggingSettings | None = None
+
+
+def configure_logging(logging_settings: LoggingSettings | None = None) -> LoggingSettings:
+    """
+    Initialise stdlib logging using values from :class:`LoggingSettings`.
+
+    The function is idempotent—subsequent calls return the already-applied settings without
+    reconfiguring handlers. When called with ``None`` (default) it obtains settings from
+    :func:`get_settings`, allowing environment variables to drive configuration:
+
+    - File logging is always configured using a rotating file handler rooted at
+      ``logging.log_dir`` / ``logging.file_name``.
+    - Console logging is optional and can be toggled or level-adjusted independently.
+    - Package-specific levels are applied for any loggers named in ``logging.loggers``.
+
+    Parameters
+    ----------
+    logging_settings:
+        Optional explicit :class:`LoggingSettings` instance. If omitted, cached application
+        settings are used.
+
+    Returns
+    -------
+    LoggingSettings
+        The active logging configuration instance applied to the process.
+    """
+    global _LOGGING_CONFIGURED
+    global _ACTIVE_LOGGING_SETTINGS
+
+    if _LOGGING_CONFIGURED:
+        assert _ACTIVE_LOGGING_SETTINGS is not None
+        return _ACTIVE_LOGGING_SETTINGS
+
+    if logging_settings is None:
+        logging_settings = get_settings().logging
+
+    log_dir = logging_settings.log_dir
+    if not log_dir.is_absolute():
+        log_dir = (Path.cwd() / log_dir).resolve()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / logging_settings.file_name
+
+    formatter = logging.Formatter(logging_settings.fmt, logging_settings.datefmt)
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(logging_settings.level.upper())
+
+    file_handler = RotatingFileHandler(
+        str(log_file),
+        maxBytes=logging_settings.max_bytes,
+        backupCount=logging_settings.backup_count,
+        encoding="utf-8",
+    )
+    file_handler.setLevel((logging_settings.file_level or logging_settings.level).upper())
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    if logging_settings.console_enabled:
+        console_handler = StdoutStreamHandler()
+        console_handler.setLevel(
+            (logging_settings.console_level or logging_settings.level).upper(),
+        )
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+
+    for name, level in logging_settings.loggers.items():
+        package_logger = logging.getLogger(name)
+        package_logger.setLevel(level.upper())
+        package_logger.propagate = logging_settings.propagate
+
+    _ACTIVE_LOGGING_SETTINGS = logging_settings
+    _LOGGING_CONFIGURED = True
+    return logging_settings
 
 
 @lru_cache

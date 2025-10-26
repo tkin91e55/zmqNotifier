@@ -7,11 +7,13 @@ For development with ipython autoreload:
 import logging
 
 from .DWX_ZeroMQ_Connector_v2_0_1_RC8 import DWX_ZeroMQ_Connector
+from .config import configure_logging
 from .market_data import MarketDataHandler
 from .market_data import get_timeframe_minutes
 from .market_data import validate_symbol
 from .market_data import validate_timeframe
 
+LOGGING_SETTINGS = configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -58,6 +60,11 @@ class ZmqMt4Client(DWX_ZeroMQ_Connector):
         # Settings
         self._verbose = True
         self._loggers = {}
+        logger.debug(
+            "ZmqMt4Client logger initialised at level %s; log file: %s",
+            LOGGING_SETTINGS.level.upper(),
+            LOGGING_SETTINGS.log_dir / LOGGING_SETTINGS.file_name,
+        )
 
         logger.info("ZmqMt4Client initialized")
 

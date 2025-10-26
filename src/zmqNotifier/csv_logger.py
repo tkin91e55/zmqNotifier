@@ -120,33 +120,3 @@ class DataLogger:
     def __del__(self):
         """Destructor to ensure file is closed."""
         self.close()
-
-class DataValidator:
-    """
-    TODO it was found the TF data could be invalid from MT4 server,.
-
-    for example, ohlc are all same value continually, very unlikely
-    1. so strange, library WIFI, the data is invalid...
-    """
-
-    INVALID_COUNT_THRESHOLD = 30
-    def __init__(self, proxy):
-        """Proxy: ZMQ_MT4."""
-        self._proxy = proxy
-        self._invalid_count = defaultdict(int)
-
-    def is_ohlc_same(self, symbol, ohlc):
-        is_same = (ohlc["open"] == ohlc["high"] == ohlc["low"] == ohlc["close"])
-        cnt = self._invalid_count
-        cnt[symbol] = cnt[symbol] + 1 if is_same else 0
-        if cnt[symbol] > self.INVALID_COUNT_THRESHOLD:
-            print(f"Warning: {symbol} has {self._invalid_count[symbol]}"
-                    "consecutive invalid OHLC data.")
-            self._proxy.unsubscribe(symbol)
-
-    def is_tick_stale(self):
-        """
-        Check if tick data is stale (too old).
-
-        The server side has no timestamp in data... should check?
-        """
