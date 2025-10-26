@@ -25,6 +25,19 @@ class StorageBackend(str, Enum):
     SQLITE = "sqlite"
 
 
+class BrokerSettings(BaseModel):
+    """Broker-specific configuration."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    brokertime_tz: int = Field(
+        default=0,
+        ge=-12,
+        le=14,
+        description="Broker timezone offset from UTC in hours (e.g., 11 for UTC+11).",
+    )
+
+
 class ZmqSettings(BaseModel):
     """ZeroMQ connection configuration."""
 
@@ -43,13 +56,26 @@ class StorageSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     data_path: Path = Field(
-        default=Path("./data"), description="Root path for persisted market data.",
+        default=Path("./data"),
+        description="Root path for persisted market data.",
     )
     backend: StorageBackend = Field(
-        default=StorageBackend.CSV, description="Active storage backend.",
+        default=StorageBackend.CSV,
+        description="Active storage backend.",
     )
     compression_enabled: bool = Field(
-        default=True, description="Enable compression for stored data.",
+        default=True,
+        description="Enable monthly compression for stored data.",
+    )
+    retention_days: int = Field(
+        default=180,
+        ge=1,
+        description="Number of days to retain market data before cleanup.",
+    )
+    flush_interval_minutes: int = Field(
+        default=5,
+        ge=1,
+        description="Minutes between data buffer flushes to storage.",
     )
 
 
@@ -163,6 +189,7 @@ class AppSettings(BaseSettings):
         validate_assignment=True,
     )
 
+    broker: BrokerSettings = Field(default_factory=BrokerSettings)
     zmq: ZmqSettings = Field(default_factory=ZmqSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     validation: DataValidationSettings = Field(default_factory=DataValidationSettings)
@@ -180,7 +207,9 @@ class AppSettings(BaseSettings):
             return self
 
         storage_path = _ensure_directory(self.storage.data_path)
-        object.__setattr__(self, 'storage', self.storage.model_copy(update={"data_path": storage_path}))
+        object.__setattr__(
+            self, "storage", self.storage.model_copy(update={"data_path": storage_path})
+        )
 
         return self
 

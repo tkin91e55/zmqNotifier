@@ -1,4 +1,11 @@
-"""Mock MT4 market data for testing."""
+"""
+Mock MT4 market data for testing.
+
+REAL_MARKET_DATA structure:
+[('BTCUSD_M1', ('2025-09-15 09:55:58.893002', (1757940840, 114898.16, 114917.86, 114888.64, 114890.42, 66, 0, 0))...),
+ ('BTCUSD_M5', ('2025-09-15 09:55:58.896449', (1757934900, 115489.69, 115710.88, 115435.11, 115658.48, 740, 0, 0))...),
+ ('BTCUSD', ('2025-09-16 14:19:48.430725', (115006.13, 115023.24))...)]
+"""
 
 import pickle
 from itertools import islice

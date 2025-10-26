@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 from pydantic import Field
+from pydantic import field_serializer
 from pydantic import field_validator
 
 
@@ -14,6 +15,11 @@ class TickData(BaseModel):
     datetime: datetime
     bid: Decimal = Field(..., gt=0, description="Bid price must be positive")
     ask: Decimal = Field(..., gt=0, description="Ask price must be positive")
+
+    @field_serializer("datetime")
+    def serialize_datetime(self, dt: datetime) -> str:
+        """Serialize datetime as 'YYYY-MM-DD HH:MM:SS+TZ:TZ' format."""
+        return dt.isoformat(sep=" ")
 
     @field_validator("ask")
     @classmethod
@@ -34,6 +40,11 @@ class OHLCData(BaseModel):
     low: Decimal = Field(..., gt=0, description="Low price must be positive")
     close: Decimal = Field(..., gt=0, description="Close price must be positive")
     volume: int = Field(..., ge=0, description="Volume must be non-negative")
+
+    @field_serializer("datetime")
+    def serialize_datetime(self, dt: datetime) -> str:
+        """Serialize datetime as 'YYYY-MM-DD HH:MM:SS+TZ:TZ' format."""
+        return dt.isoformat(sep=" ")
 
     @field_validator("high")
     @classmethod
@@ -87,7 +98,6 @@ class OHLCData(BaseModel):
     #         print(f"Warning: {symbol} has {self._invalid_count[symbol]}"
     #                 "consecutive invalid OHLC data.")
     #         self._proxy.unsubscribe(symbol)
-
 
 
 class MarketDataMessage(BaseModel):

@@ -35,7 +35,6 @@ class ZmqMt4Client(DWX_ZeroMQ_Connector):
 
     Delegates to specialized handlers:
     - MarketDataHandler: Parse and validate raw data
-    - DataValidator: Detect anomalies TODO should be part of MarketData hanlding too
     """
 
     def __init__(self, *args, **kwargs):
@@ -59,7 +58,6 @@ class ZmqMt4Client(DWX_ZeroMQ_Connector):
 
         # Settings
         self._verbose = True
-        self._loggers = {}
         logger.debug(
             "ZmqMt4Client logger initialised at level %s; log file: %s",
             LOGGING_SETTINGS.level.upper(),
@@ -144,11 +142,6 @@ class ZmqMt4Client(DWX_ZeroMQ_Connector):
         """
         self._DWX_MTX_UNSUBSCRIBE_MARKETDATA_(symbol)
         logger.info("Unsubscribed from %s", symbol)
-
-        # Clean up loggers
-        if symbol in self._loggers:
-            self._loggers[symbol].close()
-            del self._loggers[symbol]
 
     def track_ticks(self, symbol: str) -> None:
         """
@@ -235,10 +228,6 @@ class ZmqMt4Client(DWX_ZeroMQ_Connector):
     def shutdown(self) -> None:
         """Shutdown the client and clean up resources."""
         logger.info("Shutting down ZmqMt4Client")
-
-        # # Close all loggers TODO deal with loggers too?
-        # for data_logger in self._loggers.values():
-        #     data_logger.close()
 
         self._DWX_ZMQ_SHUTDOWN_()
         logger.info("ZmqMt4Client shutdown complete")

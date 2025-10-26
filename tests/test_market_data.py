@@ -9,6 +9,7 @@ from fixtures.mock_data import mock_multiple_ohlc
 from fixtures.mock_data import mock_multiple_ticks
 from fixtures.mock_data import mock_ohlc_data
 from fixtures.mock_data import mock_tick_data
+from zmqNotifier.market_data import FLAT_BAR_THRESHOLD
 from zmqNotifier.market_data import MarketDataHandler
 from zmqNotifier.models import OHLCData
 from zmqNotifier.models import TickData
@@ -17,7 +18,14 @@ from zmqNotifier.models import TickData
 @pytest.fixture()
 def handler():
     """Create MarketDataHandler with mock client."""
-    mock_client = type("MockClient", (), {})()
+    class MockClient:
+        def __init__(self):
+            self.unsubscribed: list[str] = []
+
+        def unsubscribe(self, symbol: str) -> None:
+            self.unsubscribed.append(symbol)
+
+    mock_client = MockClient()
     return MarketDataHandler(mock_client)
 
 
@@ -121,6 +129,19 @@ class TestOHLCDataParsing:
 
             assert len(messages) == 1
             assert messages[0].timeframe == timeframe
+
+    def test_parse_brokertime_but_not_utc(self, handler):
+        raw_data = mock_ohlc_data(symbol="BTCUSD", timeframe="M1")
+        channel = "BTCUSD_M1"
+        rd = raw_data[channel]
+        broker_timestamp = next(iter(rd.values()))[0]
+        broker_timestamp_in_utc = broker_timestamp - handler.brokertime_tz * 3600
+        from datetime import datetime, UTC
+
+        expected = datetime.fromtimestamp(broker_timestamp_in_utc, UTC)
+
+        messages = handler._parse_channel(channel, raw_data[channel])
+        assert messages[0].data.datetime == expected
 
 
 class TestSymbolValidation:
@@ -263,6 +284,34 @@ class TestProcessMethod:
 
         captured = capsys.readouterr()
         assert "BTCUSD" in captured.out
+
+    def test_process_detects_flat_ohlc_and_unsubscribes(self, handler, capsys):
+        """Consecutive flat OHLC bars should trigger unsubscribe."""
+        symbol = "BTCUSD"
+        timeframe = "M1"
+        base_broker_time = 1_700_000_000
+
+        bar_count = FLAT_BAR_THRESHOLD + 1
+        channel = f"{symbol}_{timeframe}"
+        raw_data = {
+            channel: {
+                f"2025-10-09 06:{i:02d}:00.000000": (
+                    base_broker_time + i * 60,
+                    100.0,
+                    100.0,
+                    100.0,
+                    100.0,
+                    50.0,
+                )
+                for i in range(bar_count)
+            },
+        }
+
+        handler.process(raw_data)
+
+        captured = capsys.readouterr()
+        assert symbol in captured.out
+        assert handler._client.unsubscribed == [symbol]
 
 
 class TestEdgeCases:
