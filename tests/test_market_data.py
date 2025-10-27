@@ -18,6 +18,7 @@ from zmqNotifier.models import TickData
 @pytest.fixture()
 def handler():
     """Create MarketDataHandler with mock client."""
+
     class MockClient:
         def __init__(self):
             self.unsubscribed: list[str] = []
@@ -136,7 +137,8 @@ class TestOHLCDataParsing:
         rd = raw_data[channel]
         broker_timestamp = next(iter(rd.values()))[0]
         broker_timestamp_in_utc = broker_timestamp - handler.brokertime_tz * 3600
-        from datetime import datetime, UTC
+        from datetime import UTC
+        from datetime import datetime
 
         expected = datetime.fromtimestamp(broker_timestamp_in_utc, UTC)
 

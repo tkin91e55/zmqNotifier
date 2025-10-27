@@ -2,9 +2,9 @@
 
 import shutil
 import zipfile
+from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from datetime import timezone
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -19,7 +19,7 @@ from zmqNotifier.models import OHLCData
 from zmqNotifier.models import TickData
 
 
-@pytest.fixture
+@pytest.fixture()
 def test_data_path(request):
     """
     Create persistent test_data directory per test for inspection.
@@ -34,7 +34,7 @@ def test_data_path(request):
     return data_path
 
 
-@pytest.fixture
+@pytest.fixture()
 def storage_settings(test_data_path):
     """Create storage settings with test data path."""
     return StorageSettings(
@@ -46,27 +46,27 @@ def storage_settings(test_data_path):
     )
 
 
-@pytest.fixture
+@pytest.fixture()
 def csv_backend(test_data_path):
     """Create CSV storage backend."""
     return CSVStorageBackend(test_data_path)
 
 
-@pytest.fixture
+@pytest.fixture()
 def sample_tick_data():
     """Standard tick data for testing."""
     return TickData(
-        datetime=datetime.now(timezone.utc),
+        datetime=datetime.now(UTC),
         bid=Decimal("1.1000"),
         ask=Decimal("1.1002"),
     )
 
 
-@pytest.fixture
+@pytest.fixture()
 def sample_ohlc_data():
     """Standard OHLC data for testing."""
     return OHLCData(
-        datetime=datetime.now(timezone.utc),
+        datetime=datetime.now(UTC),
         open=Decimal("1.1000"),
         high=Decimal("1.1100"),
         low=Decimal("1.0900"),
@@ -89,7 +89,7 @@ class TestCSVStorageBackend:
         """Test logging tick data."""
         csv_backend.log_tick("BTCUSD", sample_tick_data)
 
-        current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
         key = f"BTCUSD_tick_{current_date}"
         assert key in csv_backend._buffers
         buffer_content = csv_backend._buffers[key].getvalue()
@@ -100,7 +100,7 @@ class TestCSVStorageBackend:
         """Test logging OHLC data."""
         csv_backend.log_ohlc("BTCUSD", "M1", sample_ohlc_data)
 
-        current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
         key = f"BTCUSD_M1_{current_date}"
         assert key in csv_backend._buffers
         buffer_content = csv_backend._buffers[key].getvalue()
@@ -112,7 +112,7 @@ class TestCSVStorageBackend:
         csv_backend.log_tick("BTCUSD", sample_tick_data)
         csv_backend.flush()
 
-        current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
         year_month = current_date[:7].replace("-", "_")
         csv_file = test_data_path / "BTCUSD" / year_month / f"BTCUSD_tick_{current_date}.csv"
         assert csv_file.exists()
@@ -126,7 +126,7 @@ class TestCSVStorageBackend:
         csv_backend.log_ohlc("BTCUSD", "M1", sample_ohlc_data)
         csv_backend.flush()
 
-        current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
         year_month = current_date[:7].replace("-", "_")
         csv_file = test_data_path / "BTCUSD" / year_month / f"BTCUSD_M1_{current_date}.csv"
         assert csv_file.exists()
@@ -149,7 +149,7 @@ class TestCSVStorageBackend:
         csv_file3 = btc_dir / "BTCUSD_M1_2025-09-15.csv"
         csv_file3.write_text("datetime,open,high,low,close,volume\n")
 
-        current_utc = datetime(2025, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
+        current_utc = datetime(2025, 10, 1, 12, 0, 0, tzinfo=UTC)
         csv_backend.compress(current_utc)
 
         tick_archive = test_data_path / "BTCUSD" / "BTCUSD_tick_2025-09.zip"
@@ -175,7 +175,7 @@ class TestCSVStorageBackend:
         csv_backend.log_tick("BTCUSD", sample_tick_data)
         assert len(csv_backend._buffers) == 1
 
-        utc_now = datetime(2025, 10, 26, 12, 0, 0, tzinfo=timezone.utc).strftime("%Y-%m-%d")
+        utc_now = datetime(2025, 10, 26, 12, 0, 0, tzinfo=UTC).strftime("%Y-%m-%d")
         with patch("zmqNotifier.market_data_logger.CSVStorageBackend.flush") as mock_flush:
             csv_backend.rotate(utc_now)
             assert len(csv_backend._buffers) == 0
@@ -184,7 +184,7 @@ class TestCSVStorageBackend:
         csv_backend.log_tick("BTCUSD", sample_tick_data)
         assert len(csv_backend._buffers) == 1
 
-        utc_tomorrow = datetime(2025, 10, 27, 12, 0, 0, tzinfo=timezone.utc).strftime("%Y-%m-%d")
+        utc_tomorrow = datetime(2025, 10, 27, 12, 0, 0, tzinfo=UTC).strftime("%Y-%m-%d")
         csv_backend.rotate(utc_tomorrow)
         assert len(csv_backend._buffers) == 0
 
@@ -199,7 +199,7 @@ class TestCSVStorageBackend:
         recent_archive = btc_dir / "BTCUSD_tick_2025-10.zip"
         recent_archive.write_text("dummy zip content")
 
-        current_utc = datetime(2025, 10, 26, tzinfo=timezone.utc)
+        current_utc = datetime(2025, 10, 26, tzinfo=UTC)
         csv_backend.cleanup(retention_days=180, current_utc=current_utc)
 
         assert not old_archive.exists()
@@ -220,7 +220,7 @@ class TestMarketDataLogger:
         logger = MarketDataLogger(storage_settings)
         logger.log_tick("BTCUSD", sample_tick_data)
 
-        current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
         key = f"BTCUSD_tick_{current_date}"
         assert key in logger.backend._buffers
 
@@ -229,7 +229,7 @@ class TestMarketDataLogger:
         logger = MarketDataLogger(storage_settings)
         logger.log_ohlc("BTCUSD", "M1", sample_ohlc_data)
 
-        current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
         key = f"BTCUSD_M1_{current_date}"
         assert key in logger.backend._buffers
 
@@ -237,9 +237,9 @@ class TestMarketDataLogger:
         """Test maintenance task execution."""
         logger = MarketDataLogger(storage_settings)
 
-        logger._last_flush = datetime.now(timezone.utc) - timedelta(minutes=10)
-        logger._last_maintenance_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime(
-            "%Y-%m-%d"
+        logger._last_flush = datetime.now(UTC) - timedelta(minutes=10)
+        logger._last_maintenance_date = (datetime.now(UTC) - timedelta(days=1)).strftime(
+            "%Y-%m-%d",
         )
 
         flush_called = False
@@ -295,7 +295,7 @@ class TestMarketDataLogger:
         logger.log_tick("BTCUSD", sample_tick_data)
         logger.shutdown()
 
-        current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
         year_month = current_date[:7].replace("-", "_")
         csv_file = test_data_path / "BTCUSD" / year_month / f"BTCUSD_tick_{current_date}.csv"
         assert csv_file.exists()

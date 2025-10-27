@@ -208,7 +208,9 @@ class AppSettings(BaseSettings):
 
         storage_path = _ensure_directory(self.storage.data_path)
         object.__setattr__(
-            self, "storage", self.storage.model_copy(update={"data_path": storage_path})
+            self,
+            "storage",
+            self.storage.model_copy(update={"data_path": storage_path}),
         )
 
         return self
@@ -261,6 +263,7 @@ def configure_logging(logging_settings: LoggingSettings | None = None) -> Loggin
     -------
     LoggingSettings
         The active logging configuration instance applied to the process.
+
     """
     global _LOGGING_CONFIGURED
     global _ACTIVE_LOGGING_SETTINGS

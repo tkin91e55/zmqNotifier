@@ -14,7 +14,6 @@ from .models import MarketDataMessage
 from .models import OHLCData
 from .models import TickData
 
-
 configure_logging()
 logger = logging.getLogger(__name__)
 
@@ -74,10 +73,7 @@ class MarketDataHandler:
         self._data_logger: MarketDataLogger = MarketDataLogger(settings.storage)
         self._flat_bar_counts: defaultdict[tuple[str, str], int] = defaultdict(int)
         self.brokertime_tz = settings.broker.brokertime_tz
-        logger.debug(
-            "MarketDataHandler initialized with brokertime_tz=%s",
-            self.brokertime_tz,
-        )
+        logger.debug("MarketDataHandler initialized with brokertime_tz=%s", self.brokertime_tz)
 
     def process(self, raw_data: dict) -> None:
         """
@@ -112,11 +108,7 @@ class MarketDataHandler:
                         data_logger.log_tick(message.symbol, message.data)
                     elif isinstance(message.data, OHLCData):
                         if message.timeframe:
-                            data_logger.log_ohlc(
-                                message.symbol,
-                                message.timeframe,
-                                message.data,
-                            )
+                            data_logger.log_ohlc(message.symbol, message.timeframe, message.data)
 
             except SameOHLCError as exc:
                 self._handle_flat_bar_exception(exc)
@@ -149,8 +141,7 @@ class MarketDataHandler:
                 logger.info("Unsubscribed from %s after flat OHLC detection", exc.symbol)
             except Exception:
                 logger.exception(
-                    "Failed to unsubscribe from %s following flat OHLC detection",
-                    exc.symbol,
+                    "Failed to unsubscribe from %s following flat OHLC detection", exc.symbol,
                 )
         else:
             logger.error(
@@ -189,10 +180,7 @@ class MarketDataHandler:
                 raise
             except Exception:
                 logger.exception(
-                    "Failed to parse data for %s at %s: %s",
-                    channel,
-                    utc_time_str,
-                    data_tuple,
+                    "Failed to parse data for %s at %s: %s", channel, utc_time_str, data_tuple,
                 )
 
         logger.debug("Parsed %d messages from channel %s", len(messages), channel)
@@ -206,12 +194,7 @@ class MarketDataHandler:
         # OHLC channel
         return parts[0], parts[1]
 
-    def _parse_tick(
-        self,
-        symbol: str,
-        utc_time_str: str,
-        data_tuple: tuple,
-    ) -> MarketDataMessage:
+    def _parse_tick(self, symbol: str, utc_time_str: str, data_tuple: tuple) -> MarketDataMessage:
         """
         Parse tick data tuple into MarketDataMessage with TickData.
 
@@ -229,24 +212,12 @@ class MarketDataHandler:
         bid, ask = data_tuple[:2]  # Ignore any extra fields
         dt = datetime.fromisoformat(utc_time_str).replace(tzinfo=UTC)
 
-        tick_data = TickData(
-            datetime=dt,
-            bid=Decimal(str(bid)),
-            ask=Decimal(str(ask)),
-        )
+        tick_data = TickData(datetime=dt, bid=Decimal(str(bid)), ask=Decimal(str(ask)))
 
-        return MarketDataMessage(
-            symbol=symbol,
-            timeframe=None,
-            data=tick_data,
-        )
+        return MarketDataMessage(symbol=symbol, timeframe=None, data=tick_data)
 
     def _parse_ohlc(
-        self,
-        symbol: str,
-        timeframe: str,
-        utc_time_str: str,
-        data_tuple: tuple,
+        self, symbol: str, timeframe: str, utc_time_str: str, data_tuple: tuple,
     ) -> MarketDataMessage:
         """
         Parse OHLC bar data tuple into MarketDataMessage with OHLCData.
@@ -281,25 +252,16 @@ class MarketDataHandler:
 
         self._check_flat_ohlc(symbol, timeframe, ohlc_data)
 
-        return MarketDataMessage(
-            symbol=symbol,
-            timeframe=timeframe,
-            data=ohlc_data,
-        )
-
+        return MarketDataMessage(symbol=symbol, timeframe=timeframe, data=ohlc_data)
 
     def _check_flat_ohlc(self, symbol: str, timeframe: str, ohlc: OHLCData) -> None:
         """Track consecutive OHLC bars where open/high/low/close are identical."""
         key = (symbol, timeframe)
 
-        if (
-            ohlc.open == ohlc.high
-            and ohlc.open == ohlc.low
-            and ohlc.open == ohlc.close
-        ):
+        if ohlc.open == ohlc.high and ohlc.open == ohlc.low and ohlc.open == ohlc.close:
             self._flat_bar_counts[key] += 1
             logger.debug(
-                "Flat OHLC detected for %s (%s) – streak=%d",
+                "Flat OHLC detected for %s (%s) - streak=%d",
                 symbol,
                 timeframe,
                 self._flat_bar_counts[key],

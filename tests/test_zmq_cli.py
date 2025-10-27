@@ -1,11 +1,11 @@
 """Tests for ZmqMt4Client."""
 
 from unittest.mock import MagicMock
-from unittest.mock import Mock
 from unittest.mock import patch
-from fixtures.mock_data import REAL_MARKET_DATA
 
 import pytest
+
+from fixtures.mock_data import REAL_MARKET_DATA
 
 
 @pytest.fixture()
@@ -17,10 +17,12 @@ def mock_dwx_connector():
         # making testing harder and less thorough
         # patch("zmqNotifier.zmq_cli.DWX_ZeroMQ_Connector.__init__", MagicMock()),
         patch(
-            "zmqNotifier.zmq_cli.DWX_ZeroMQ_Connector._DWX_MTX_SUBSCRIBE_MARKETDATA_", MagicMock()
+            "zmqNotifier.zmq_cli.DWX_ZeroMQ_Connector._DWX_MTX_SUBSCRIBE_MARKETDATA_",
+            MagicMock(),
         ),
         patch(
-            "zmqNotifier.zmq_cli.DWX_ZeroMQ_Connector._DWX_MTX_UNSUBSCRIBE_MARKETDATA_", MagicMock()
+            "zmqNotifier.zmq_cli.DWX_ZeroMQ_Connector._DWX_MTX_UNSUBSCRIBE_MARKETDATA_",
+            MagicMock(),
         ),
         patch(
             "zmqNotifier.zmq_cli.DWX_ZeroMQ_Connector._DWX_MTX_SEND_TRACKPRICES_REQUEST_",
@@ -39,9 +41,10 @@ def mock_dwx_connector():
 def zmq_client(mock_dwx_connector):
     """Create ZmqMt4Client instance with mocked dependencies."""
     from zmqNotifier.zmq_cli import ZmqMt4Client
+
     client = ZmqMt4Client(_host="mock_host")
     yield client
-    if hasattr(client, 'shutdown'):
+    if hasattr(client, "shutdown"):
         client.shutdown()
 
 
@@ -49,6 +52,7 @@ def zmq_client(mock_dwx_connector):
 def real_market_data():
     """Load real market data from pickle file."""
     return REAL_MARKET_DATA
+
 
 class TestZmqMt4ClientInitialization:
     def test_client_initializes_with_data_handler(self, zmq_client):

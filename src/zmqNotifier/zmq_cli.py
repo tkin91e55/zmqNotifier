@@ -1,13 +1,15 @@
 """
+ZMQ client for MT4 integration.
+
 For development with ipython autoreload:
     %load_ext autoreload
-    %autoreload 2
+    %autoreload 2.
 """
 
 import logging
 
-from .DWX_ZeroMQ_Connector_v2_0_1_RC8 import DWX_ZeroMQ_Connector
 from .config import configure_logging
+from .DWX_ZeroMQ_Connector_v2_0_1_RC8 import DWX_ZeroMQ_Connector
 from .market_data import MarketDataHandler
 from .market_data import get_timeframe_minutes
 from .market_data import validate_symbol
@@ -98,11 +100,7 @@ class ZmqMt4Client(DWX_ZeroMQ_Connector):
         return self._Market_Data_DB
 
     def subscribe(
-        self,
-        symbol: str,
-        *,
-        for_tickdata: bool = False,
-        for_ohlc_m1: bool = False,
+        self, symbol: str, *, for_tickdata: bool = False, for_ohlc_m1: bool = False,
     ) -> None:
         """
         Subscribe to market data channel for a symbol.

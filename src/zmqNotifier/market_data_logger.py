@@ -3,13 +3,14 @@
 import logging
 import zipfile
 from collections import defaultdict
+from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from datetime import timezone
 from io import StringIO
 from pathlib import Path
 
-from cachetools import cached, TTLCache
+from cachetools import TTLCache
+from cachetools import cached
 
 from .abstract_class import StorageBackend
 from .config import StorageSettings
@@ -26,13 +27,14 @@ def _extract_year_month(date_str: str) -> str:
 
 @cached(cache=TTLCache(maxsize=1024, ttl=1))
 def _get_current_date() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def _get_next_flush_time(flush_interval_minutes) -> datetime:
-    utc = datetime.now(timezone.utc)
+    utc = datetime.now(UTC)
     flush_interval = timedelta(minutes=flush_interval_minutes)
     return utc + flush_interval
+
 
 def _compress_csv(root_path: Path, current_utc: datetime) -> None:
     last_month = current_utc.replace(day=1) - timedelta(days=1)
@@ -85,7 +87,7 @@ def _clean_old_archives(root_path: Path, retention_days: int, current_utc: datet
         if len(parts) < 3:
             return None
         try:
-            return datetime.strptime(parts[-1], "%Y-%m").replace(tzinfo=timezone.utc)
+            return datetime.strptime(parts[-1], "%Y-%m").replace(tzinfo=UTC)
         except ValueError:
             return None
 
@@ -109,8 +111,10 @@ def _clean_old_archives(root_path: Path, retention_days: int, current_utc: datet
             retention_days,
         )
 
+
 class CSVStorageBackend(StorageBackend):
-    """CSV-based storage backend with UTC-based rotation.
+    """
+    CSV-based storage backend with UTC-based rotation.
 
     1. Logging: csv files are organized under data/symbol/YYYY_MM/, e.g., data/BTCUSD/2024_06/
        named as {symbol}_{type}_{date}.csv, e.g., BTCUSD_tick_2024-06-25.csv
@@ -119,10 +123,12 @@ class CSVStorageBackend(StorageBackend):
        When compressed, the original csv files are deleted.
     3. Cleanup: delete the compressed .zip older than retention period (e.g., 180 days).
 
-    Attributes:
+    Attributes
+    ----------
         data_path: Root directory for CSV files.
         _buffers: In-memory StringIO buffers keyed by "{symbol}_{type}_{date}".
                   where type are tick/M1/M5/....
+
     """
 
     def __init__(self, data_path: Path):
@@ -133,6 +139,7 @@ class CSVStorageBackend(StorageBackend):
     def _make_buffer_key(self, symbol: str, data_type: str, date: str) -> str:
         """
         Generate buffer key: {symbol}_{data_type}_{date}.
+
         data_type: tick/M1/M5...
         """
         return f"{symbol}_{data_type}_{date}"
@@ -149,7 +156,7 @@ class CSVStorageBackend(StorageBackend):
         current_date = _get_current_date()
         key = self._make_buffer_key(symbol, "tick", current_date)
         buffer = self._ensure_buffer(key, "datetime,bid,ask\n")
-        buffer.write(f"{str(tick.datetime)},{tick.bid},{tick.ask}\n")
+        buffer.write(f"{tick.datetime!s},{tick.bid},{tick.ask}\n")
 
     def log_ohlc(self, symbol: str, timeframe: str, ohlc: OHLCData) -> None:
         """Log OHLC bar data to CSV buffer."""
@@ -157,7 +164,7 @@ class CSVStorageBackend(StorageBackend):
         key = self._make_buffer_key(symbol, timeframe, current_date)
         buffer = self._ensure_buffer(key, "datetime,open,high,low,close,volume\n")
         buffer.write(
-            f"{str(ohlc.datetime)},{ohlc.open},{ohlc.high},{ohlc.low},{ohlc.close},{ohlc.volume}\n"
+            f"{ohlc.datetime!s},{ohlc.open},{ohlc.high},{ohlc.low},{ohlc.close},{ohlc.volume}\n",
         )
 
     def flush(self) -> None:
@@ -191,7 +198,8 @@ class CSVStorageBackend(StorageBackend):
     def rotate(self, current_date: str) -> None:
         """
         Rotate to new date-based files.
-        rotate flush yesterday buffers and clear the _buffers with many keys
+
+        Flush yesterday buffers and clear the _buffers with many keys.
         """
         self.flush()
         self._buffers.clear()
@@ -200,27 +208,32 @@ class CSVStorageBackend(StorageBackend):
     def cleanup(self, retention_days: int, current_utc: datetime) -> None:
         """
         Delete compressed ZIP archives older than retention period.
-        Archives are named {symbol}_{type}_{YYYY-MM}.zip under data/symbol/
+
+        Archives are named {symbol}_{type}_{YYYY-MM}.zip under data/symbol/.
         """
         _clean_old_archives(self.data_path, retention_days, current_utc)
 
     def compress(self, current_utc: datetime) -> None:
         """
         Compress last month's CSV files into monthly archives per symbol.
+
         Archives are named {symbol}_{type}_{YYYY-MM}.zip under data/symbol/
-        Example: data/BTCUSD/BTCUSD_tick_2024-06.zip
+        Example: data/BTCUSD/BTCUSD_tick_2024-06.zip.
         """
         _compress_csv(self.data_path, current_utc)
 
 
 class MarketDataLogger:
-    """Orchestrator for market data logging with pluggable backends.
+    """
+    Orchestrator for market data logging with pluggable backends.
 
-    Attributes:
+    Attributes
+    ----------
         settings: Storage configuration settings.
         backend: Active storage backend instance (e.g., CSVStorageBackend).
         _next_flush: Timestamp for next flush operation.
         _last_maintenance_date: UTC date string (YYYY-MM-DD) of last maintenance run.
+
     """
 
     def __init__(self, storage_settings: StorageSettings):
@@ -234,15 +247,16 @@ class MarketDataLogger:
 
         if self.settings.backend == StorageBackendEnum.CSV:
             return CSVStorageBackend(self.settings.data_path)
-        else:
-            msg = f"Unsupported storage backend: {self.settings.backend}"
-            raise ValueError(msg)
+        msg = f"Unsupported storage backend: {self.settings.backend}"
+        raise ValueError(msg)
 
     def log_tick(self, symbol: str, tick: TickData) -> None:
+        """Log tick data via storage backend."""
         self.backend.log_tick(symbol, tick)
         self._poll_flush()
 
     def log_ohlc(self, symbol: str, timeframe: str, ohlc: OHLCData) -> None:
+        """Log OHLC data via storage backend."""
         self.backend.log_ohlc(symbol, timeframe, ohlc)
         self._poll_flush()
 
@@ -252,7 +266,7 @@ class MarketDataLogger:
 
     def _poll_flush(self) -> None:
         """Flush buffers if interval has elapsed."""
-        utc_now = datetime.now(timezone.utc)
+        utc_now = datetime.now(UTC)
 
         if utc_now >= self._next_flush:
             self.backend.flush()
@@ -263,7 +277,7 @@ class MarketDataLogger:
         current_date = _get_current_date()
 
         if current_date != self._last_maintenance_date:
-            utc_now = datetime.now(timezone.utc)
+            utc_now = datetime.now(UTC)
             self.backend.rotate(current_date)
             if self.settings.compression_enabled:
                 self.backend.compress(utc_now)

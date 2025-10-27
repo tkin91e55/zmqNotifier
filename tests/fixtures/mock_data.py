@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """
 Mock MT4 market data for testing.
 

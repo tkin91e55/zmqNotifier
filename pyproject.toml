@@ -47,6 +47,9 @@ line-length = 100
 indent-width = 4
 target-version = "py311"
 src = ["src", "tests"]
+exclude = [
+    "src/zmqNotifier/DWX_ZeroMQ_Connector_v2_0_1_RC8.py"
+]
 
 [tool.ruff.lint]
 select = [
@@ -65,7 +68,6 @@ select = [
   "FBT",    # flake8-boolean-trap - avoid boolean function arguments
   "B",      # flake8-bugbear - likely bugs and design problems
   "A",      # flake8-builtins - avoid shadowing builtins
-  "COM",    # flake8-commas - trailing comma enforcement
   "C4",     # flake8-comprehensions - better list/dict comprehensions
   "DTZ",    # flake8-datetimez - datetime timezone awareness
   "T10",    # flake8-debugger - no debugger statements
@@ -73,7 +75,6 @@ select = [
   "EM",     # flake8-errmsg - error message best practices
   "EXE",    # flake8-executable - shebang presence/absence
   "FA",     # flake8-future-annotations - future annotations usage
-  'ISC',    # flake8-implicit-str-concat - implicit string concatenation
   "ICN",    # flake8-import-conventions - import naming conventions
   "G",      # flake8-logging-format - logging format strings
   'INP',    # flake8-no-pep420 - require __init__.py
@@ -121,13 +122,23 @@ ignore = [
   "D107",   # Missing docstring in __init__
   "D203",   # 1 blank line required before class docstring (conflicts with D211)
   "D212",   # Multi-line docstring summary should start at first line (conflicts with D213)
-  "E402"    # Module level import not at top of file
+  "E402",   # Module level import not at top of file
+  "D100",   # Missing docstring in public module (not critical)
+  "D102",   # Missing docstring in public method (acceptable for simple methods)
+  "D103",   # Missing docstring in public function (acceptable for simple functions)
+  "PLW0603", # Global statement usage (acceptable for logging setup)
+  "PLR2004", # Magic value comparison (acceptable for numeric thresholds)
+  "RUF012",  # Mutable class attributes (acceptable without ClassVar in this context)
+  "C901",    # Complex structure (acceptable for data parsing logic)
+  "BLE001",  # Blind except (acceptable with proper logging)
+  "SIM102",  # Collapsible if (sometimes clearer when separate)
+  "N999"     # Invalid module name (third-party file naming)
 ]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
-skip-magic-trailing-comma = false
+skip-magic-trailing-comma = true # disable make list linewise
 line-ending = "auto"
 
 [tool.ruff.lint.isort]
@@ -135,7 +146,8 @@ force-single-line = true
 
 [tool.ruff.lint.per-file-ignores]
 "src/zmqNotifier/DWX_ZeroMQ_Connector_v2_0_1_RC8.py" = ["ALL"]
-"tests/**/test_*.py" = ["D103"]
+"tests/**/test_*.py" = ["D103","D101","SLF001", "PTH118", "D401", "DTZ005",
+                        "INP001", "PT004" , "PTH100", "PTH120", "D205", "D400", "D415" ]
 
 [tool.pylint.main]
 py-version = "3.11"
