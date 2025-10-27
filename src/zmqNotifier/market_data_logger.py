@@ -269,6 +269,7 @@ class MarketDataLogger:
         utc_now = datetime.now(UTC)
 
         if utc_now >= self._next_flush:
+            logger.info("Flushing market data to storage backend")
             self.backend.flush()
             self._next_flush = self._update_next_flush()
 
@@ -277,6 +278,7 @@ class MarketDataLogger:
         current_date = _get_current_date()
 
         if current_date != self._last_maintenance_date:
+            logger.info("Running daily maintenance tasks for")
             utc_now = datetime.now(UTC)
             self.backend.rotate(current_date)
             if self.settings.compression_enabled:

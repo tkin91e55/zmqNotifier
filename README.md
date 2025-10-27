@@ -1,7 +1,7 @@
-agentic_py
+zmqnotifier
 ==========
 
-``agentic_py`` is a reference implementation of a modern Python 3.11 project
+``zmqnotifier`` is a reference implementation of a modern Python 3.11 project
 that demonstrates how to structure code, documentation, and tooling when
 building agent-focused workflows. The repository highlights an opinionated
 setup featuring Poetry for dependency management, Pydantic for validation,
@@ -16,8 +16,8 @@ Project Structure
 The src/ and tests/ does nothing actually
 
 ```
-agentic_py/
-├── src/agentic_py/          # Application package
+zmqnotifier/
+├── src/zmqnotifier/          # Application package
 │   ├── core/                # Core functionality (registries, coordination)
 │   ├── models/              # Pydantic models and schemas
 │   ├── services/            # Business orchestration logic

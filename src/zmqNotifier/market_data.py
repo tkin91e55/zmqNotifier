@@ -98,7 +98,7 @@ class MarketDataHandler:
                     continue
 
                 for message in messages:
-                    logger.info(
+                    logger.debug(
                         "Processed message from %s: %s",
                         channel,
                         message.model_dump(mode="json", round_trip=True),

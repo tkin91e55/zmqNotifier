@@ -66,7 +66,7 @@ class ZmqMt4Client(DWX_ZeroMQ_Connector):
             LOGGING_SETTINGS.log_dir / LOGGING_SETTINGS.file_name,
         )
 
-        logger.info("ZmqMt4Client initialized")
+        logger.info("ZmqMt4Client initialized, connected to %s", self._host)
 
     @property
     def is_active(self) -> bool:
@@ -228,4 +228,5 @@ class ZmqMt4Client(DWX_ZeroMQ_Connector):
         logger.info("Shutting down ZmqMt4Client")
 
         self._DWX_ZMQ_SHUTDOWN_()
+        self.data_handler.shutdown()
         logger.info("ZmqMt4Client shutdown complete")
