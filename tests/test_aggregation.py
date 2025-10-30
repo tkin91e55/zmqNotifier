@@ -232,6 +232,8 @@ def test_two_minute_buckets_basic():
     agg.add(base + timedelta(seconds=30), 5.0)
     agg.add(base + timedelta(minutes=1), 15.0)
 
+    assert len(agg._buckets) == 0
+
     # Query active only
     min_val, max_val = agg.query_min_max(num_buckets=0)
     assert min_val == 5.0

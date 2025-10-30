@@ -84,6 +84,8 @@ class BucketedSlidingAggregator:
 
         # Storage
         self._buckets: deque[Bucket] = deque()
+        # days=1 make sense, just arbitray large number
+        # to keep all tickes in the partial bucket, as active window is only for current bucket
         self._active_window = SlidingWindowMinMax(window=timedelta(days=1))
         self._current_bucket_start: Optional[datetime] = None
 
