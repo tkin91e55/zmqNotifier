@@ -6,6 +6,7 @@ This module provides a high-performance tick aggregator that:
 - Maintains active bucket using monotonic deque
 - Condenses buckets to aggregates on boundary crossing
 - Supports O(log n) range queries via segment tree
+- Tracks maximum tick count across queried buckets for activity analysis
 """
 
 from collections import deque
@@ -65,7 +66,12 @@ class BucketedSlidingAggregator:
     Usage:
         agg = BucketedSlidingAggregator(bucket_span=timedelta(minutes=1))
         agg.add(timestamp, price)
-        min_val, max_val = agg.query_min_max(num_buckets=60)  # Last 60 minutes
+
+        # Query returns (min, max, max_count)
+        min_val, max_val, max_count = agg.query_min_max(num_buckets=60)
+
+        # max_count shows the highest tick count from any bucket in the range
+        # Useful for identifying most active periods or liquidity analysis
     """
 
     def __init__(self, bucket_span: timedelta, max_window: Optional[int] = None):
@@ -126,9 +132,9 @@ class BucketedSlidingAggregator:
         # Add to active window
         self._active_window.add(timestamp, value)
 
-    def query_min_max(self, num_buckets: int = 0) -> tuple[float, float]:
+    def query_min_max(self, num_buckets: int = 0) -> tuple[float, float, int]:
         """
-        Query min/max over active bucket + historical time range.
+        Query min/max/max_count over active bucket + historical time range.
 
         Args:
             num_buckets: Number of bucket time spans to look back (0 = active only)
@@ -136,7 +142,8 @@ class BucketedSlidingAggregator:
                         Empty buckets (gaps) are naturally ignored
 
         Returns:
-            (min_value, max_value) tuple
+            (min_value, max_value, max_count) tuple where max_count is the
+            maximum count from any bucket (or active window) in the range
 
         Raises:
             ValueError: If num_buckets is negative
@@ -144,46 +151,48 @@ class BucketedSlidingAggregator:
 
         Examples:
             # Active bucket only
-            min_val, max_val = agg.query_min_max(0)
+            min_val, max_val, max_count = agg.query_min_max(0)
 
             # Last hour (60 one-minute buckets)
-            min_val, max_val = agg.query_min_max(60)
+            min_val, max_val, max_count = agg.query_min_max(60)
         """
         if num_buckets < 0:
             raise ValueError("num_buckets must be non-negative")
 
-        # Start with active window min/max
-        min_value, max_value = self._get_active_window_minmax()
+        # Start with active window min/max/count
+        min_value, max_value, max_count = self._get_active_window_stats()
 
         # Add historical buckets if requested
         if num_buckets > 0:
-            hist_min, hist_max = self._query_historical_buckets(num_buckets)
+            hist_min, hist_max, hist_max_count = self._query_historical_buckets(num_buckets)
             min_value = min(min_value, hist_min)
             max_value = max(max_value, hist_max)
+            max_count = max(max_count, hist_max_count)
 
         # Check if we found any data
         if min_value is inf:
             raise LookupError("window is empty")
 
-        return min_value, max_value
+        return min_value, max_value, max_count
 
     # ========================================================================
     # Active Window Management
     # ========================================================================
 
-    def _get_active_window_minmax(self) -> tuple[float, float]:
+    def _get_active_window_stats(self) -> tuple[float, float, int]:
         """
-        Get min/max from active window.
+        Get min/max/count from active window.
 
         Returns:
-            (min_value, max_value) or (inf, -inf) if empty
+            (min_value, max_value, count) or (inf, -inf, 0) if empty
         """
         try:
             min_val = float(self._active_window.current_min().value)
             max_val = float(self._active_window.current_max().value)
-            return min_val, max_val
+            count = len(self._active_window._points)
+            return min_val, max_val, count
         except LookupError:
-            return inf, -inf
+            return inf, -inf, 0
 
     def _condense_active_bucket(self) -> None:
         """
@@ -213,6 +222,8 @@ class BucketedSlidingAggregator:
         Returns:
             Bucket with aggregated data or empty bucket if no points
         """
+        # Type guard - this method is only called when _current_bucket_start is not None
+        assert self._current_bucket_start is not None
         bucket_end = self._current_bucket_start + self._bucket_span
 
         if not self._active_window._points:
@@ -238,18 +249,18 @@ class BucketedSlidingAggregator:
     # Historical Bucket Queries
     # ========================================================================
 
-    def _query_historical_buckets(self, num_buckets: int) -> tuple[float, float]:
+    def _query_historical_buckets(self, num_buckets: int) -> tuple[float, float, int]:
         """
-        Query min/max from historical buckets using segment tree.
+        Query min/max/max_count from historical buckets using segment tree.
 
         Args:
             num_buckets: Number of bucket time spans to look back
 
         Returns:
-            (min_value, max_value) or (inf, -inf) if no data
+            (min_value, max_value, max_count) or (inf, -inf, 0) if no data
         """
         if not self._buckets or self._current_bucket_start is None:
-            return inf, -inf
+            return inf, -inf, 0
 
         # Lazy rebuild segment tree if needed
         self._rebuild_tree_if_dirty()
@@ -259,13 +270,13 @@ class BucketedSlidingAggregator:
         left_idx = self._find_first_bucket_in_range(lookback_start)
 
         if left_idx == -1 or self._segment_tree is None:
-            return inf, -inf
+            return inf, -inf, 0
 
-        # Query segment tree for O(log n) min/max
+        # Query segment tree for O(log n) min/max/max_count
         right_idx = len(self._buckets) - 1
-        tree_min, tree_max = self._segment_tree.query(left_idx, right_idx)
+        tree_min, tree_max, tree_max_count = self._segment_tree.query(left_idx, right_idx)
 
-        return tree_min, tree_max
+        return tree_min, tree_max, tree_max_count
 
     def _rebuild_tree_if_dirty(self) -> None:
         """Rebuild segment tree if marked dirty."""

@@ -1,6 +1,5 @@
 """Notification system for market alerts and monitoring."""
 
-from decimal import Decimal
 import logging
 from collections import defaultdict
 from collections import deque

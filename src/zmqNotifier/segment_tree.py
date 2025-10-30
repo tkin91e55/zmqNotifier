@@ -1,8 +1,8 @@
 """
-Segment tree implementation for efficient range min/max queries.
+Segment tree implementation for efficient range min/max/count queries.
 
 This module provides a segment tree data structure optimized for
-querying minimum and maximum values over arbitrary ranges in O(log n) time.
+querying minimum, maximum, and max count values over arbitrary ranges in O(log n) time.
 """
 
 from collections import deque
@@ -15,12 +15,12 @@ if TYPE_CHECKING:
 
 class SegmentTreeMinMax:
     """
-    Array-based segment tree for O(log n) range min/max queries.
+    Array-based segment tree for O(log n) range min/max/count queries.
 
     The tree is stored in a flat array with the following properties:
     - Node i has children at indices 2*i+1 (left) and 2*i+2 (right)
-    - Each node stores (min_value, max_value) for its range
-    - Empty buckets contribute (inf, -inf) and are naturally ignored
+    - Each node stores (min_value, max_value, max_count) for its range
+    - Empty buckets contribute (inf, -inf, 0) and are naturally ignored
 
     Complexity:
     - Build: O(n)
@@ -38,31 +38,31 @@ class SegmentTreeMinMax:
         self._n = len(buckets)
 
         if self._n == 0:
-            self._tree: list[tuple[float, float]] = []
+            self._tree: list[tuple[float, float, int]] = []
             return
 
         # Allocate tree array (4n is conservative but handles all cases)
-        self._tree = [(inf, -inf)] * (4 * self._n)
+        self._tree = [(inf, -inf, 0)] * (4 * self._n)
 
         # Build tree recursively from buckets
         self._build(buckets, node=0, start=0, end=self._n - 1)
 
-    def query(self, left_idx: int, right_idx: int) -> tuple[float, float]:
+    def query(self, left_idx: int, right_idx: int) -> tuple[float, float, int]:
         """
-        Query min/max over bucket index range in O(log n) time.
+        Query min/max/max_count over bucket index range in O(log n) time.
 
         Args:
             left_idx: Left bucket index (inclusive)
             right_idx: Right bucket index (inclusive)
 
         Returns:
-            (min_value, max_value) over the range
+            (min_value, max_value, max_count) over the range
 
         Raises:
             ValueError: If indices are out of bounds or invalid
         """
         if self._n == 0:
-            return inf, -inf
+            return inf, -inf, 0
 
         self._validate_range(left_idx, right_idx)
         return self._query_range(
@@ -80,10 +80,10 @@ class SegmentTreeMinMax:
             end: Right boundary of range (inclusive)
         """
         if start == end:
-            # Leaf node - copy bucket values (empty buckets stay as inf, -inf)
+            # Leaf node - copy bucket values (empty buckets stay as inf, -inf, 0)
             bucket = buckets[start]
             if not bucket.is_empty:
-                self._tree[node] = (bucket.min_value, bucket.max_value)
+                self._tree[node] = (bucket.min_value, bucket.max_value, bucket.count)
             return
 
         # Internal node - recursively build children then merge
@@ -98,7 +98,7 @@ class SegmentTreeMinMax:
 
     def _query_range(
         self, node: int, node_start: int, node_end: int, query_left: int, query_right: int
-    ) -> tuple[float, float]:
+    ) -> tuple[float, float, int]:
         """
         Recursive range query helper.
 
@@ -110,11 +110,11 @@ class SegmentTreeMinMax:
             query_right: Query range end
 
         Returns:
-            (min_value, max_value) for the overlapping range
+            (min_value, max_value, max_count) for the overlapping range
         """
         # No overlap - return neutral values
         if query_right < node_start or query_left > node_end:
-            return inf, -inf
+            return inf, -inf, 0
 
         # Complete overlap - return node value directly
         if query_left <= node_start and node_end <= query_right:
@@ -130,21 +130,21 @@ class SegmentTreeMinMax:
         return self._merge_values(left_result, right_result)
 
     def _merge_values(
-        self, left: tuple[float, float], right: tuple[float, float]
-    ) -> tuple[float, float]:
+        self, left: tuple[float, float, int], right: tuple[float, float, int]
+    ) -> tuple[float, float, int]:
         """
-        Merge two (min, max) tuples.
+        Merge two (min, max, max_count) tuples.
 
         Args:
-            left: (min, max) from left child
-            right: (min, max) from right child
+            left: (min, max, max_count) from left child
+            right: (min, max, max_count) from right child
 
         Returns:
-            Merged (min, max) tuple
+            Merged (min, max, max_count) tuple
         """
-        left_min, left_max = left
-        right_min, right_max = right
-        return min(left_min, right_min), max(left_max, right_max)
+        left_min, left_max, left_count = left
+        right_min, right_max, right_count = right
+        return min(left_min, right_min), max(left_max, right_max), max(left_count, right_count)
 
     def _validate_range(self, left_idx: int, right_idx: int) -> None:
         """
