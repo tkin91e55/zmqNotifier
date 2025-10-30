@@ -56,26 +56,19 @@ class StorageSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     data_path: Path = Field(
-        default=Path("./data"),
-        description="Root path for persisted market data.",
+        default=Path("./data"), description="Root path for persisted market data."
     )
     backend: StorageBackend = Field(
-        default=StorageBackend.CSV,
-        description="Active storage backend.",
+        default=StorageBackend.CSV, description="Active storage backend."
     )
     compression_enabled: bool = Field(
-        default=True,
-        description="Enable monthly compression for stored data.",
+        default=True, description="Enable monthly compression for stored data."
     )
     retention_days: int = Field(
-        default=180,
-        ge=1,
-        description="Number of days to retain market data before cleanup.",
+        default=180, ge=1, description="Number of days to retain market data before cleanup."
     )
     flush_interval_minutes: int = Field(
-        default=5,
-        ge=1,
-        description="Minutes between data buffer flushes to storage.",
+        default=5, ge=1, description="Minutes between data buffer flushes to storage."
     )
 
 
@@ -111,13 +104,12 @@ class NotificationSettings(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    enabled: bool = Field(default=False, description="Enable/disable all notifications globally.")
     telegram_bot_token: str | None = Field(
-        default=None,
-        description="Telegram bot token (if Telegram notifications are used).",
+        default=None, description="Telegram bot token (if Telegram notifications are used)."
     )
     telegram_chat_id: str | None = Field(
-        default=None,
-        description="Telegram chat to receive notifications.",
+        default=None, description="Telegram chat to receive notifications."
     )
 
 
@@ -131,47 +123,32 @@ class LoggingSettings(BaseModel):
         default="%(asctime)s %(levelname)s %(name)s: %(message)s",
         description="Logging format string.",
     )
-    datefmt: str = Field(
-        default="%Y-%m-%d %H:%M:%S",
-        description="Datetime format used in logs.",
-    )
+    datefmt: str = Field(default="%Y-%m-%d %H:%M:%S", description="Datetime format used in logs.")
     log_dir: Path = Field(
         default=Path("./logs"),
         description="Directory for log files (relative paths resolved at runtime).",
     )
     file_name: str = Field(
-        default="runtime.log",
-        description="Filename for the rotating file handler.",
+        default="runtime.log", description="Filename for the rotating file handler."
     )
     max_bytes: int = Field(
-        default=10 * 1024 * 1024,
-        description="Maximum size per log file before rotation (bytes).",
+        default=10 * 1024 * 1024, description="Maximum size per log file before rotation (bytes)."
     )
-    backup_count: int = Field(
-        default=5,
-        description="Number of rotated log files to retain.",
-    )
+    backup_count: int = Field(default=5, description="Number of rotated log files to retain.")
     console_enabled: bool = Field(
-        default=True,
-        description="Emit logs to stdout in addition to file output.",
+        default=True, description="Emit logs to stdout in addition to file output."
     )
     console_level: str | None = Field(
-        default=None,
-        description="Optional override for console handler level.",
+        default=None, description="Optional override for console handler level."
     )
     file_level: str | None = Field(
-        default=None,
-        description="Optional override for file handler level.",
+        default=None, description="Optional override for file handler level."
     )
     propagate: bool = Field(
-        default=True,
-        description="Allow package loggers to propagate to root handlers.",
+        default=True, description="Allow package loggers to propagate to root handlers."
     )
     loggers: dict[str, str] = Field(
-        default_factory=lambda: {
-            "zmqNotifier.market_data": "INFO",
-            "zmqNotifier.zmq_cli": "INFO",
-        },
+        default_factory=lambda: {"zmqNotifier.market_data": "INFO", "zmqNotifier.zmq_cli": "INFO"},
         description="Per-logger level overrides (name -> level).",
     )
 
@@ -196,8 +173,7 @@ class AppSettings(BaseSettings):
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     auto_create_dirs: bool = Field(
-        default=True,
-        description="Create required directories automatically on settings load.",
+        default=True, description="Create required directories automatically on settings load."
     )
 
     @model_validator(mode="after")
@@ -208,9 +184,7 @@ class AppSettings(BaseSettings):
 
         storage_path = _ensure_directory(self.storage.data_path)
         object.__setattr__(
-            self,
-            "storage",
-            self.storage.model_copy(update={"data_path": storage_path}),
+            self, "storage", self.storage.model_copy(update={"data_path": storage_path})
         )
 
         return self
@@ -298,9 +272,7 @@ def configure_logging(logging_settings: LoggingSettings | None = None) -> Loggin
 
     if logging_settings.console_enabled:
         console_handler = StdoutStreamHandler()
-        console_handler.setLevel(
-            (logging_settings.console_level or logging_settings.level).upper(),
-        )
+        console_handler.setLevel((logging_settings.console_level or logging_settings.level).upper())
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
 

@@ -6,6 +6,7 @@ from collections import deque
 
 logger = logging.getLogger(__name__)
 
+
 class VolatilityNotifier:
     """
     Volatility measures ticks counts (activity of trades) and price fluctuations over
@@ -64,10 +65,27 @@ class VolatilityNotifier:
         self.tick_deque.append(tick)
         # Further processing to be implemented
 
+
 from abc import ABC, abstractmethod
 
+
 class NotifierBackend(ABC):
+    """Abstract base class for notification backends."""
 
     @abstractmethod
-    def send_message(self, message: str):
+    async def send_message(self, message: str) -> bool:
+        """
+        Send a notification message.
+
+        Parameters
+        ----------
+        message : str
+            The message to send
+
+        Returns
+        -------
+        bool
+            True if the message was sent successfully, False otherwise
+
+        """
         pass

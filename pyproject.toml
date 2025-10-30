@@ -14,6 +14,7 @@ python-dotenv = "^1.0.1"
 pydantic = "^2.11.0"
 pydantic-settings = "^2.11.0"
 cachetools = "^6.2.1"
+httpx = "^0.28.1"
 
 [tool.poetry.group.dev.dependencies]
 mypy = "^1.10.0"
@@ -29,6 +30,7 @@ ipython = "^9.0.2"
 zmq = "^0.0.0"
 pyzmq = "^27.1.0"
 pandas = "^2.3.2"
+pytest-asyncio = ">=0.23,<1.0"
 
 [tool.mypy]
 python_version = "3.11"
@@ -163,6 +165,10 @@ disable = [
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]
+markers = [
+    "asyncio: mark test as async",
+]
+asyncio_mode = "auto"
 
 [tool.coverage.run]
 branch = true
