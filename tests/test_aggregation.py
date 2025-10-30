@@ -375,7 +375,7 @@ def test_one_hour_buckets_clock_alignment():
 
     # Start at 12:37:42 (should align to 12:00:00)
     base = datetime(2024, 1, 1, 12, 37, 42)
-    assert agg._bucket_start_for(base) == datetime(2024, 1, 1, 12, 0, 0)
+    assert agg._align_to_bucket_boundary(base) == datetime(2024, 1, 1, 12, 0, 0)
     agg.add(base, 100.0)
 
     # Add at 12:58:30 (still in [12:00, 13:00) bucket)

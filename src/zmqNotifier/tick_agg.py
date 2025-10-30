@@ -1,5 +1,12 @@
-# Tick Aggregator with bucketed sliding window support.
-# Uses monotonic deque for active bucket, condenses to aggregates on boundary crossing.
+"""
+Tick aggregator with bucketed sliding window support.
+
+This module provides a high-performance tick aggregator that:
+- Groups ticks into fixed-size time buckets (clock-aligned)
+- Maintains active bucket using monotonic deque
+- Condenses buckets to aggregates on boundary crossing
+- Supports O(log n) range queries via segment tree
+"""
 
 from collections import deque
 from dataclasses import dataclass
@@ -7,12 +14,23 @@ from datetime import datetime, timedelta
 from math import inf
 from typing import Optional
 
+from zmqNotifier.segment_tree import SegmentTreeMinMax
 from zmqNotifier.sliding_windows import SlidingWindowMinMax
+
+
+# ============================================================================
+# Data Models
+# ============================================================================
 
 
 @dataclass
 class Bucket:
-    """Aggregate for one fixed-size time bucket (condensed from active deque)."""
+    """
+    Aggregate for one fixed-size time bucket.
+
+    Stores min/max/count for all ticks that fall within the bucket's time range.
+    Condensed from the active deque when crossing bucket boundaries.
+    """
 
     start: datetime
     end: datetime
@@ -22,261 +40,251 @@ class Bucket:
 
     @property
     def is_empty(self) -> bool:
+        """Check if bucket has no data points."""
         return self.count == 0
 
 
-class SegmentTreeMinMax:
-    """
-    Array-based segment tree for O(log n) range min/max queries.
-
-    Tree layout (0-indexed):
-    - Node i has children at 2*i+1 (left) and 2*i+2 (right)
-    - Leaf nodes start at index n-1 where n = len(tree)//2 + 1
-    - Each node stores (min_value, max_value) for its range
-    """
-
-    def __init__(self, buckets: deque[Bucket]):
-        """
-        Build segment tree from buckets in O(n) time.
-
-        Args:
-            buckets: Deque of condensed buckets (only non-empty buckets contribute)
-        """
-        n = len(buckets)
-        self._n = n
-
-        if n == 0:
-            self._tree: list[tuple[float, float]] = []
-            return
-
-        # Tree size: need 4*n space for complete binary tree (conservative but safe)
-        tree_size = 4 * n
-        self._tree = [(inf, -inf)] * tree_size
-
-        # Build tree bottom-up
-        self._build(buckets, 0, 0, n - 1)
-
-    def _build(self, buckets: deque[Bucket], node: int, start: int, end: int) -> None:
-        """
-        Recursively build segment tree.
-
-        Args:
-            buckets: Source bucket deque
-            node: Current tree node index
-            start: Left boundary of range (inclusive)
-            end: Right boundary of range (inclusive)
-        """
-        if start == end:
-            # Leaf node - copy bucket values (skip empty buckets)
-            bucket = buckets[start]
-            if not bucket.is_empty:
-                self._tree[node] = (bucket.min_value, bucket.max_value)
-            return
-
-        mid = (start + end) // 2
-        left_child = 2 * node + 1
-        right_child = 2 * node + 2
-
-        # Recursively build children
-        self._build(buckets, left_child, start, mid)
-        self._build(buckets, right_child, mid + 1, end)
-
-        # Merge children into current node
-        left_min, left_max = self._tree[left_child]
-        right_min, right_max = self._tree[right_child]
-        self._tree[node] = (min(left_min, right_min), max(left_max, right_max))
-
-    def query(self, left_idx: int, right_idx: int) -> tuple[float, float]:
-        """
-        Query min/max over bucket index range [left_idx, right_idx] in O(log n) time.
-
-        Args:
-            left_idx: Left bucket index (inclusive)
-            right_idx: Right bucket index (inclusive)
-
-        Returns:
-            (min_value, max_value) over the range
-
-        Raises:
-            ValueError: If indices are out of bounds or inverted
-        """
-        if self._n == 0:
-            return inf, -inf
-
-        if left_idx < 0 or right_idx >= self._n or left_idx > right_idx:
-            raise ValueError(f"Invalid range [{left_idx}, {right_idx}] for tree size {self._n}")
-
-        return self._query(0, 0, self._n - 1, left_idx, right_idx)
-
-    def _query(
-        self, node: int, node_start: int, node_end: int, query_left: int, query_right: int
-    ) -> tuple[float, float]:
-        """
-        Recursive range query helper.
-
-        Args:
-            node: Current tree node index
-            node_start: Start of node's range
-            node_end: End of node's range
-            query_left: Query range start
-            query_right: Query range end
-
-        Returns:
-            (min_value, max_value) for the overlapping range
-        """
-        # No overlap
-        if query_right < node_start or query_left > node_end:
-            return inf, -inf
-
-        # Complete overlap - return node value
-        if query_left <= node_start and node_end <= query_right:
-            return self._tree[node]
-
-        # Partial overlap - recurse on children
-        mid = (node_start + node_end) // 2
-        left_child = 2 * node + 1
-        right_child = 2 * node + 2
-
-        left_min, left_max = self._query(left_child, node_start, mid, query_left, query_right)
-        right_min, right_max = self._query(right_child, mid + 1, node_end, query_left, query_right)
-
-        return min(left_min, right_min), max(left_max, right_max)
-
-    def rebuild(self, buckets: deque[Bucket]) -> None:
-        """
-        Rebuild entire tree from scratch (used after bucket eviction).
-
-        Args:
-            buckets: Updated deque of buckets
-        """
-        self.__init__(buckets)
+# ============================================================================
+# Aggregator
+# ============================================================================
 
 
 class BucketedSlidingAggregator:
     """
-    Maintains one active monotonic deque for current bucket, plus historical
-    condensed buckets. Buckets align to clock boundaries.
+    High-performance tick aggregator with bucketed sliding windows.
 
-    - add(): Adds ticks to active deque, condenses on boundary crossing
-    - query_min_max(num_buckets): Returns min/max from active bucket + last N time spans
-      - num_buckets=0: active bucket only
-      - num_buckets>0: active bucket + last N*bucket_span of time (gaps ignored)
+    Architecture:
+    - Active bucket: Uses SlidingWindowMinMax for O(1) min/max tracking
+    - Historical buckets: Stored as condensed aggregates in a deque
+    - Query optimization: Segment tree for O(log n) range queries
+
+    Time Complexity:
+    - add(): O(1) amortized
+    - query_min_max(): O(log n) where n = number of buckets in range
+
+    Usage:
+        agg = BucketedSlidingAggregator(bucket_span=timedelta(minutes=1))
+        agg.add(timestamp, price)
+        min_val, max_val = agg.query_min_max(num_buckets=60)  # Last 60 minutes
     """
 
     def __init__(self, bucket_span: timedelta, max_window: Optional[int] = None):
         """
+        Initialize the aggregator.
+
         Args:
             bucket_span: Time span for each bucket (e.g., timedelta(minutes=1))
             max_window: Maximum number of buckets to retain (None = unlimited)
         """
         if bucket_span <= timedelta(0):
             raise ValueError("bucket_span must be positive")
+
         self._bucket_span = bucket_span
         self._max_window = max_window
 
-        # Historical condensed buckets
+        # Storage
         self._buckets: deque[Bucket] = deque()
-
-        # Segment tree for O(log n) range queries (lazily built)
-        self._segment_tree: Optional[SegmentTreeMinMax] = None
-        self._tree_dirty = True  # Track if tree needs rebuilding
-
-        # Active sliding window for current bucket (reusing SlidingWindowMinMax)
         self._active_window = SlidingWindowMinMax(window=timedelta(days=1))
         self._current_bucket_start: Optional[datetime] = None
 
+        # Query optimization (lazy-built segment tree)
+        self._segment_tree: Optional[SegmentTreeMinMax] = None
+        self._tree_dirty = True
+
+    # ========================================================================
+    # Public API
+    # ========================================================================
+
     def add(self, timestamp: datetime, value: float) -> None:
-        """Add a tick to the aggregator. Condenses active deque on bucket boundary crossing."""
-        # Check for non-decreasing timestamps
-        if self._buckets and timestamp < self._buckets[-1].end:
-            raise ValueError("timestamps must be non-decreasing")
-        if self._active_window._points and timestamp < self._active_window._points[-1].timestamp:
-            raise ValueError("timestamps must be non-decreasing")
+        """
+        Add a tick to the aggregator.
 
-        bucket_start = self._bucket_start_for(timestamp)
+        Automatically condenses the active bucket on boundary crossing.
 
-        # Detect boundary crossing and condense
-        if self._current_bucket_start is not None and bucket_start != self._current_bucket_start:
+        Args:
+            timestamp: Tick timestamp
+            value: Tick value
+
+        Raises:
+            ValueError: If timestamp is not non-decreasing
+        """
+        self._validate_timestamp(timestamp)
+
+        bucket_start = self._align_to_bucket_boundary(timestamp)
+
+        # Handle bucket boundary crossing
+        if self._is_new_bucket(bucket_start):
             self._condense_active_bucket()
-            # Update to new bucket start after condensing
             self._current_bucket_start = bucket_start
 
-        # Initialize bucket start if first point
+        # Initialize first bucket
         if self._current_bucket_start is None:
             self._current_bucket_start = bucket_start
 
-        # Add to active window (SlidingWindowMinMax handles the deque logic)
+        # Add to active window
         self._active_window.add(timestamp, value)
 
     def query_min_max(self, num_buckets: int = 0) -> tuple[float, float]:
         """
-        Query min/max over active bucket + last N bucket time spans.
+        Query min/max over active bucket + historical time range.
 
         Args:
             num_buckets: Number of bucket time spans to look back (0 = active only)
-                         e.g., num_buckets=3 means look back 3*bucket_span of time
-                         Empty buckets (gaps) in the time range are naturally ignored
+                        e.g., num_buckets=3 means look back 3*bucket_span of time
+                        Empty buckets (gaps) are naturally ignored
 
         Returns:
-            (min_value, max_value)
+            (min_value, max_value) tuple
 
         Raises:
             ValueError: If num_buckets is negative
             LookupError: If the window is empty
+
+        Examples:
+            # Active bucket only
+            min_val, max_val = agg.query_min_max(0)
+
+            # Last hour (60 one-minute buckets)
+            min_val, max_val = agg.query_min_max(60)
         """
         if num_buckets < 0:
             raise ValueError("num_buckets must be non-negative")
 
-        min_value, max_value = inf, -inf
+        # Start with active window min/max
+        min_value, max_value = self._get_active_window_minmax()
 
-        # Get min/max from active window (SlidingWindowMinMax handles the deques)
-        try:
-            min_value = float(self._active_window.current_min().value)
-            max_value = float(self._active_window.current_max().value)
-        except LookupError:
-            # Active window is empty, will rely on buckets
-            pass
+        # Add historical buckets if requested
+        if num_buckets > 0:
+            hist_min, hist_max = self._query_historical_buckets(num_buckets)
+            min_value = min(min_value, hist_min)
+            max_value = max(max_value, hist_max)
 
-        # Calculate time-based lookback range and use segment tree for O(log n) query
-        if num_buckets > 0 and self._current_bucket_start is not None and self._buckets:
-            # Rebuild tree if dirty (lazy rebuilding for better amortized performance)
-            if self._tree_dirty:
-                self._segment_tree = SegmentTreeMinMax(self._buckets)
-                self._tree_dirty = False
-
-            lookback_start = self._current_bucket_start - num_buckets * self._bucket_span
-
-            # Binary search to find first bucket in time range
-            left_idx = self._find_first_bucket_in_range(lookback_start)
-
-            if left_idx != -1:
-                # Use segment tree for O(log n) range query
-                right_idx = len(self._buckets) - 1
-                if self._segment_tree is not None:
-                    tree_min, tree_max = self._segment_tree.query(left_idx, right_idx)
-                    if tree_min != inf:  # Check if we got valid results
-                        min_value = min(min_value, tree_min)
-                        max_value = max(max_value, tree_max)
-
+        # Check if we found any data
         if min_value is inf:
             raise LookupError("window is empty")
 
         return min_value, max_value
 
-    def _find_first_bucket_in_range(self, lookback_start: datetime) -> int:
-        """
-        Binary search to find the index of the first bucket with start >= lookback_start.
+    # ========================================================================
+    # Active Window Management
+    # ========================================================================
 
-        Args:
-            lookback_start: The earliest timestamp to include in the range
+    def _get_active_window_minmax(self) -> tuple[float, float]:
+        """
+        Get min/max from active window.
 
         Returns:
-            Index of first bucket in range, or -1 if no buckets are in range
+            (min_value, max_value) or (inf, -inf) if empty
+        """
+        try:
+            min_val = float(self._active_window.current_min().value)
+            max_val = float(self._active_window.current_max().value)
+            return min_val, max_val
+        except LookupError:
+            return inf, -inf
+
+    def _condense_active_bucket(self) -> None:
+        """
+        Condense active window into a bucket aggregate.
+
+        Creates a bucket from the active window, appends it to history,
+        handles eviction, and resets the active window.
+        """
+        if self._current_bucket_start is None:
+            return
+
+        # Create bucket from active window
+        bucket = self._create_bucket_from_active_window()
+        self._buckets.append(bucket)
+
+        # Evict old buckets if needed
+        self._evict_old_buckets()
+
+        # Mark tree for rebuild and reset active window
+        self._tree_dirty = True
+        self._active_window = SlidingWindowMinMax(window=timedelta(days=1))
+
+    def _create_bucket_from_active_window(self) -> Bucket:
+        """
+        Create a bucket from the current active window state.
+
+        Returns:
+            Bucket with aggregated data or empty bucket if no points
+        """
+        bucket_end = self._current_bucket_start + self._bucket_span
+
+        if not self._active_window._points:
+            # Empty bucket for continuity
+            return Bucket(start=self._current_bucket_start, end=bucket_end)
+
+        # Extract aggregates (O(1) operations)
+        return Bucket(
+            start=self._current_bucket_start,
+            end=bucket_end,
+            min_value=float(self._active_window.current_min().value),
+            max_value=float(self._active_window.current_max().value),
+            count=len(self._active_window._points),
+        )
+
+    def _evict_old_buckets(self) -> None:
+        """Evict buckets beyond max_window if configured."""
+        if self._max_window is not None:
+            while len(self._buckets) > self._max_window:
+                self._buckets.popleft()
+
+    # ========================================================================
+    # Historical Bucket Queries
+    # ========================================================================
+
+    def _query_historical_buckets(self, num_buckets: int) -> tuple[float, float]:
+        """
+        Query min/max from historical buckets using segment tree.
+
+        Args:
+            num_buckets: Number of bucket time spans to look back
+
+        Returns:
+            (min_value, max_value) or (inf, -inf) if no data
+        """
+        if not self._buckets or self._current_bucket_start is None:
+            return inf, -inf
+
+        # Lazy rebuild segment tree if needed
+        self._rebuild_tree_if_dirty()
+
+        # Calculate time range and find bucket indices
+        lookback_start = self._current_bucket_start - num_buckets * self._bucket_span
+        left_idx = self._find_first_bucket_in_range(lookback_start)
+
+        if left_idx == -1 or self._segment_tree is None:
+            return inf, -inf
+
+        # Query segment tree for O(log n) min/max
+        right_idx = len(self._buckets) - 1
+        tree_min, tree_max = self._segment_tree.query(left_idx, right_idx)
+
+        return tree_min, tree_max
+
+    def _rebuild_tree_if_dirty(self) -> None:
+        """Rebuild segment tree if marked dirty."""
+        if self._tree_dirty and self._buckets:
+            self._segment_tree = SegmentTreeMinMax(self._buckets)
+            self._tree_dirty = False
+
+    def _find_first_bucket_in_range(self, lookback_start: datetime) -> int:
+        """
+        Binary search for first bucket within time range.
+
+        Args:
+            lookback_start: Earliest timestamp to include
+
+        Returns:
+            Index of first bucket in range, or -1 if none found
         """
         if not self._buckets:
             return -1
 
-        # We need to find the leftmost bucket where bucket.start >= lookback_start
+        # Binary search for leftmost bucket with start >= lookback_start
         left, right = 0, len(self._buckets)
 
         while left < right:
@@ -286,59 +294,50 @@ class BucketedSlidingAggregator:
             else:
                 right = mid
 
-        # Check if we found a valid index
+        # Validate result
         if left < len(self._buckets) and self._buckets[left].start >= lookback_start:
             return left
 
         return -1
 
-    def _bucket_start_for(self, timestamp: datetime) -> datetime:
+    # ========================================================================
+    # Time Alignment and Validation
+    # ========================================================================
+
+    def _align_to_bucket_boundary(self, timestamp: datetime) -> datetime:
         """
         Align timestamp to bucket boundary (floor to clock boundary).
-        E.g., for 1-minute buckets: 12:05:37 -> 12:05:00
+
+        Args:
+            timestamp: Input timestamp
+
+        Returns:
+            Bucket start timestamp
+
+        Examples:
+            For 1-minute buckets: 12:05:37 -> 12:05:00
+            For 1-hour buckets: 14:23:45 -> 14:00:00
         """
-        # Use epoch-based alignment for general case
         epoch = datetime(1970, 1, 1, tzinfo=timestamp.tzinfo)
         delta = timestamp - epoch
         bucket_count = int(delta.total_seconds() // self._bucket_span.total_seconds())
         return epoch + bucket_count * self._bucket_span
 
-    def _condense_active_bucket(self) -> None:
+    def _is_new_bucket(self, bucket_start: datetime) -> bool:
+        """Check if we're crossing into a new bucket."""
+        return self._current_bucket_start is not None and bucket_start != self._current_bucket_start
+
+    def _validate_timestamp(self, timestamp: datetime) -> None:
         """
-        Condense the active window into a bucket aggregate and append to history.
-        Clear active window after condensation.
+        Validate that timestamp is non-decreasing.
+
+        Args:
+            timestamp: Timestamp to validate
+
+        Raises:
+            ValueError: If timestamp decreases
         """
-        if self._current_bucket_start is None:
-            return  # Nothing to condense
-
-        if not self._active_window._points:
-            # No points to condense, but create empty bucket for continuity
-            bucket = Bucket(
-                start=self._current_bucket_start, end=self._current_bucket_start + self._bucket_span
-            )
-        else:
-            # Extract aggregates from SlidingWindowMinMax (O(1) operations)
-            min_value = float(self._active_window.current_min().value)
-            max_value = float(self._active_window.current_max().value)
-            count = len(self._active_window._points)
-
-            bucket = Bucket(
-                start=self._current_bucket_start,
-                end=self._current_bucket_start + self._bucket_span,
-                min_value=min_value,
-                max_value=max_value,
-                count=count,
-            )
-
-        self._buckets.append(bucket)
-
-        # Expire old buckets if max_window is set
-        if self._max_window is not None:
-            while len(self._buckets) > self._max_window:
-                self._buckets.popleft()
-
-        # Mark tree as dirty (will be rebuilt on next query)
-        self._tree_dirty = True
-
-        # Clear active window by creating a new instance
-        self._active_window = SlidingWindowMinMax(window=timedelta(days=1))
+        if self._buckets and timestamp < self._buckets[-1].end:
+            raise ValueError("timestamps must be non-decreasing")
+        if self._active_window._points and timestamp < self._active_window._points[-1].timestamp:
+            raise ValueError("timestamps must be non-decreasing")
