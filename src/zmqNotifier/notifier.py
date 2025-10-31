@@ -5,9 +5,11 @@ Volatility measures ticks counts (activity of trades) and price fluctuations ove
 short window.
 """
 
+from datetime import timedelta
 import logging
+from typing import List
+
 from dataclasses import dataclass
-from zmqNotifier.market_data import MarketDataHandler
 from zmqNotifier.tick_agg import BucketedSlidingAggregator
 from zmqNotifier.models import TickData
 
@@ -38,44 +40,17 @@ class VolatilityNotifier:
     it notifies when the thresholds are exceeded. There is cooldown in the length of small window
 
     on_tick(): Ingests ticks and drive SymbolTracks
-    Overview
-    --------
-    - Batches alert summaries so recipients are not flooded with individual tick events.
-
-    Runtime State
-    -------------
-    - tick_deque keeps the latest ticks needed to evaluate the configured windows.
-    - recent_ohlc caches aggregated OHLC snapshots per symbol and timeframe.
-    - Thresholds, cooldowns, and window settings are injected per symbol during setup.
-
-    Notification Flow
-    -----------------
-    1. Receive a tick via on_tick and update the underlying aggregators.
-    2. Recompute volatility and activity scores for each watched timeframe.
-    3. If any score crosses its trigger and is outside the cooldown window, format an alert payload.
-    4. Send the batched payload through the attached async TelegramNotifier backend.
-
-    Possible API Surface
-    --------------------
-    - configure_symbol(symbol, thresholds, windows) -> None
-    - on_tick(symbol, bid, ask, timestamp) -> None
-    - flush_pending(now) -> Optional[str]
-    - reset(symbol=None) -> None
     """
 
 
     def __init__(self):
-        """
-        """
         # a symbol host a list of aggregators, if the xxxx_threshold is defined in settings
         self.config = {}
-        # read from settings for each symbol and configure aggregators
+        # read from settings for each symbol and create SymbolTrackers for them
 
     def on_tick(self, symbol, tick:TickData):
-        # Further processing to be implemented
-        # for tf in self._aggregators[symbol]:
-        #    for aggregator in self._aggregators[symbol][tf]:
-        #       aggregator.add(tick.datetime, (tick.bid) )
+        # all symbol trackers on_tick(), which also calculate and eqnueue message
+        # ask notify_manager to flush()
         pass
 
     def update_config(self, config):
@@ -93,10 +68,6 @@ class VolatilityNotifier:
         # read
         pass
 
-    def _configure_symbol(self, symbol: str):
-        # Further processing to be implemented
-        # read
-        pass
 
 class SymbolTracker:
     """
@@ -147,31 +118,35 @@ class SymbolTracker:
             return self.volatility_score * (self.activity_score+1)
 
 
-    DEFAULT_COOLDOWN_UNIT = 1  # per TF unit
+    DEFAULT_COOLDOWN_UNIT = 1  # per TF unit, read from config
     DEFAULT_BUCKET_RETENTION = {'M1':60*24*7*4,
                                 'M5':60*24*7*4//5,
-                                'M30':60*24*7*4//15}  # 4 weeks
+                                'M30':60*24*7*4//30}  # 4 weeks
     def __init__(self, symbol: str, master):
         self._symbol = symbol
         self._master = master
         self._aggregators: dict[str, BucketedSlidingAggregator] = {}
 
-    def calculate(self):
+    def on_tick(self, tick:TickData):
+        # feed tick to each aggregator
+        pass
+
+    def _calculate(self):
         # calculate the volatility and activity scores from master's config thresholds
         pass
 
-    def add_window(self, tf):
+    def add_agg(self, tf):
         # add a BucketedSlidingAggregator for the timeframe tf
         pass
 
-    def remove_window(self, tf):
+    def remove_agg(self, tf):
         # add a BucketedSlidingAggregator for the timeframe tf
         pass
 
 
 class NotificationManager:
     """
-    Itself is a thread that keeps cooldown/escalating state per symbol/timeframe
+    Itself is a threaded work that keeps cooldown/escalating state per symbol/timeframe
     members:
       1. TelegramNotifier backend instance
         * if pririty queue is not empty, send message batch every 15 seconds
@@ -179,5 +154,32 @@ class NotificationManager:
       activity_score), and larger TF is higher priority, needs a M5, H1 parser struct to
       timedelta already has timespan order, larger timespan, larger priority weight
       3. message interval: 15 seconds, make configurable
+      4. Batches alert summaries so recipients are not flooded with individual tick events.
     """
-    pass
+    FLUSH_INTERVAL = timedelta(seconds=15)
+    @dataclass
+    class Message:
+        symbol: str
+        timeframe: str
+        volatility_score: int
+        activity_score: int
+
+    def __init__(self):
+        # initialize TelegramNotifier backend from settings
+        # initialize priority queue
+        # initialize time for flush
+        pass
+
+    def enqueue(self,symbol,tf,message):
+        pass
+
+    def _format_batch_summary(self, messages: List[Message]):
+        pass
+
+    def _flush(self):
+        # compile batch msg
+        # telegram send batch
+        # let _flush() be driven by tick events
+        pass
+
+notify_manager = NotificationManager()
