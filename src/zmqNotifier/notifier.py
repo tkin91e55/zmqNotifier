@@ -69,6 +69,28 @@ class VolatilityNotifier:
         pass
 
 
+@dataclass
+class Scores:
+    """
+    score vector, each element own cooldown and escalation value respectively
+
+    e.g. a tick comes, TF M1, volatility score (v) escalates to 1 (V), enqueue message
+    after some ticks comes, activity score (a) escalates to 1 (A), enqueue message
+    no message is enqueue for each esacled value of a/v. and cooldown of a/v is reset by
+    each tick that less than 0<a/v
+    if no further escalation, after cooldown period, the a/v score is reduced by 1, until 0
+    """
+    symbol: str
+    timeframe: str
+    volatility_score: int
+    activity_score: int
+    direction: str  # "UP" or "DOWN"
+    pip_change: int
+    volume: int
+
+    def mangnitude(self) -> int:
+        return self.volatility_score * (self.activity_score+1)
+
 class SymbolTracker:
     """
     Per symbol, it book-keeps a few short window aggregators, e.g. M1, M5, M30
@@ -99,23 +121,6 @@ class SymbolTracker:
     6. configuration: cooldown settings (integral base TF unit) and scoring parameters
     7. aggregators should store enough history buckets like 30 (configurable as min_bucket_trigger)
     """
-
-    @dataclass
-    class Scores:
-        """
-        score vector, each element own cooldown and escalation value respectively
-
-        e.g. a tick comes, TF M1, volatility score (v) escalates to 1 (V), enqueue message
-        after some ticks comes, activity score (a) escalates to 1 (A), enqueue message
-        no message is enqueue for each esacled value of a/v. and cooldown of a/v is reset by
-        each tick that less than 0<a/v
-        if no further escalation, after cooldown period, the a/v score is reduced by 1, until 0
-        """
-        volatility_score: int
-        activity_score: int
-
-        def mangnitude(self) -> int:
-            return self.volatility_score * (self.activity_score+1)
 
 
     DEFAULT_COOLDOWN_UNIT = 1  # per TF unit, read from config
@@ -157,12 +162,6 @@ class NotificationManager:
       4. Batches alert summaries so recipients are not flooded with individual tick events.
     """
     FLUSH_INTERVAL = timedelta(seconds=15)
-    @dataclass
-    class Message:
-        symbol: str
-        timeframe: str
-        volatility_score: int
-        activity_score: int
 
     def __init__(self):
         # initialize TelegramNotifier backend from settings
@@ -170,10 +169,23 @@ class NotificationManager:
         # initialize time for flush
         pass
 
-    def enqueue(self,symbol,tf,message):
+    def enqueue(self,score):
         pass
 
-    def _format_batch_summary(self, messages: List[Message]):
+    def _format_batch_summary(self):
+        """
+        scores first, then an (ordered) dict add symbol and format as the message
+
+        example:
+
+        BTCUSD UP !! GBPUSD UP !!!
+
+        # BTCUSD M1 UP
+        Volatility: 120 pips since {V}, Activity: 300 ticks since {A}
+        # BTCUSD M5 UP
+        Volatility: 120 pips since {V}, Activity: 300 ticks since {A}
+        ...
+        """
         pass
 
     def _flush(self):
