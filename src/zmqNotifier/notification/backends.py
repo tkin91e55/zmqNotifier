@@ -7,12 +7,11 @@ from typing import Any
 
 import httpx
 
-from zmqNotifier.notifier import NotifierBackend
 
 logger = logging.getLogger(__name__)
 
 
-class TelegramNotifier(NotifierBackend):
+class TelegramNotifier:
     """
     Send notifications via Telegram Bot API.
 
@@ -56,26 +55,6 @@ class TelegramNotifier(NotifierBackend):
         self._api_url = self.BASE_URL.format(token=bot_token)
 
     async def send_message(self, message: str) -> bool:
-        """
-        Send a text message to the configured Telegram chat.
-
-        Parameters
-        ----------
-        message : str
-            Message text to send (max 4096 characters per Telegram API limits)
-
-        Returns
-        -------
-        bool
-            True if message was sent successfully, False otherwise
-
-        Notes
-        -----
-        This method catches and logs all exceptions internally. It will never
-        raise an exception to the caller, making it safe to use in critical
-        notification paths.
-
-        """
         if not message:
             logger.warning("Attempted to send empty message, skipping")
             return False
@@ -125,25 +104,6 @@ class TelegramNotifier(NotifierBackend):
 
     @classmethod
     def from_config(cls, config: Any) -> TelegramNotifier:
-        """
-        Create a TelegramNotifier from a NotificationSettings config object.
-
-        Parameters
-        ----------
-        config : NotificationSettings
-            Configuration object containing telegram_bot_token and telegram_chat_id
-
-        Returns
-        -------
-        TelegramNotifier
-            Configured notifier instance
-
-        Raises
-        ------
-        ValueError
-            If required configuration fields are missing or empty
-
-        """
         if not config.telegram_bot_token:
             raise ValueError("telegram_bot_token not configured")
         if not config.telegram_chat_id:
