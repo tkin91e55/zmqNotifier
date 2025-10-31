@@ -108,17 +108,19 @@ class SlidingWindowMinMaxHeap:
 
         self._expire(timestamp)
 
-    def current_min(self) -> float:
+    def current_min(self) -> WindowPoint:
         self._prune(self._min_heap)
         if not self._min_heap:
             raise LookupError("window is empty")
-        return self._min_heap[0][0]
+        wp = WindowPoint(self._min_heap[0][2], self._min_heap[0][0])
+        return wp
 
-    def current_max(self) -> float:
+    def current_max(self) -> WindowPoint:
         self._prune(self._max_heap)
         if not self._max_heap:
             raise LookupError("window is empty")
-        return -self._max_heap[0][0]
+        wp = WindowPoint(self._min_heap[0][2], -self._max_heap[0][0])
+        return wp
 
     def _expire(self, now: datetime) -> None:
         cutoff = now - self._window

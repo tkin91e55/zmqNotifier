@@ -1,6 +1,8 @@
 # ruff: noqa: SLF001
 """Tests for market data parsing and validation."""
 
+import os
+os.environ["ZMQ_NOTIFIER_LOGGING__LEVEL"] = "DEBUG" # some test require debug logging
 from decimal import Decimal
 
 import pytest

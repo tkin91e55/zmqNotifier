@@ -148,7 +148,8 @@ class LoggingSettings(BaseModel):
         default=True, description="Allow package loggers to propagate to root handlers."
     )
     loggers: dict[str, str] = Field(
-        default_factory=lambda: {"zmqNotifier.market_data": "INFO", "zmqNotifier.zmq_cli": "INFO"},
+        # default_factory=lambda: {"zmqNotifier.market_data": "INFO", "zmqNotifier.zmq_cli": "INFO"},
+        default_factory=lambda: {},
         description="Per-logger level overrides (name -> level).",
     )
 
