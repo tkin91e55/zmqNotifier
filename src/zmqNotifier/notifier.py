@@ -20,21 +20,6 @@ class VolatilityNotifier:
     """
     Detects unusual short-term price movement and trade activity for a symbol
 
-    Add VolatilitySettings to config.py, this is tree-like:
-    TODO using pydantic settings get symbols and their thresholds for highlow and vol in TFs
-        thresholds configuration tree: symbol-> (volatility_threshold, activity_threshold)-> TFs
-        {
-            "BTCUSD": {
-            "volatility_threshold": { "M1": 999999, "M5": 9120, "M30": 300 ... }, # in pipsteps
-            "activity_threshold":   { "M1": 999, "M5": 999,"M30": 999...  }, # in volume count
-            },
-            "GBPUSD": {
-            "volatility_threshold": { "M1": 50, "M5": 120, "M30": 300 ... }, # in pipsteps
-            "activity_threshold":   { "M1": 999, "M5": 999, "M30": 999... }, # in volume count
-            },
-            ....
-        }
-
     This Notifier as manager, stream the ticks of a given symbol to aggregators. Given a
     thresholds of max-min (volatility) and tick counts (activity),
     it notifies when the thresholds are exceeded. There is cooldown in the length of small window
@@ -118,15 +103,11 @@ class SymbolTracker:
     5. Built aggregators over the small windows, then it measures the largest activities since
        the past time-span. It is like how the observatory or statisical approach report rarity of
        events.
-    6. configuration: cooldown settings (integral base TF unit) and scoring parameters
-    7. aggregators should store enough history buckets like 30 (configurable as min_bucket_trigger)
+    6. scoring per TF
+    7. aggregators should store enough history buckets like 30
     """
 
 
-    DEFAULT_COOLDOWN_UNIT = 1  # per TF unit, read from config
-    DEFAULT_BUCKET_RETENTION = {'M1':60*24*7*4,
-                                'M5':60*24*7*4//5,
-                                'M30':60*24*7*4//30}  # 4 weeks
     def __init__(self, symbol: str, master):
         self._symbol = symbol
         self._master = master
@@ -158,7 +139,6 @@ class NotificationManager:
       2. priority queue of pending messages, in priorty weight of (volatility_score +
       activity_score), and larger TF is higher priority, needs a M5, H1 parser struct to
       timedelta already has timespan order, larger timespan, larger priority weight
-      3. message interval: 15 seconds, make configurable
       4. Batches alert summaries so recipients are not flooded with individual tick events.
     """
     FLUSH_INTERVAL = timedelta(seconds=15)

@@ -113,6 +113,156 @@ class NotificationSettings(BaseModel):
     )
 
 
+class SymbolThresholds(BaseModel):
+    """Per-timeframe thresholds for volatility and activity."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    volatility_threshold: dict[str, int] = Field(
+        default_factory=dict, description="Volatility threshold per timeframe (absolute pip steps)."
+    )
+    activity_threshold: dict[str, int] = Field(
+        default_factory=dict, description="Activity threshold per timeframe (tick count)."
+    )
+
+    @field_validator("volatility_threshold","activity_threshold", mode="before")
+    @classmethod
+    def _upper_absolute_timeframes(cls, value: dict[str, int] | None):
+        """Normalize timeframe keys to uppercase and validate positive values."""
+        if value is None:
+            return {}
+        result = {}
+        for tf, threshold in value.items():
+            result[str(tf).upper()] = abs(int(threshold))
+        return result
+
+
+class SymbolTrackerConfig(BaseModel):
+    """
+    Optional overrides for tracker runtime behaviour.
+
+    NOTE: When overriding num_bucket_retention, the entire dict is replaced (not merged).
+    To override one timeframe, you must specify all timeframes you want to retain.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    cooldown_unit: int | None = Field(
+        default=None, gt=0, description="Cooldown unit expressed in timeframe multiples."
+    )
+    min_buckets_calculation: int | None = Field(
+        default=None, gt=0, description="Minimum historical buckets to consider when scoring."
+    )
+    num_bucket_retention: dict[str, int] | None = Field(
+        default=None,
+        description="Override bucket retention per timeframe. REPLACES defaults entirely.",
+    )
+
+    @field_validator("num_bucket_retention", mode="before")
+    @classmethod
+    def _upper_retention_keys(cls, value: dict[str, int] | None):
+        if value is None:
+            return None
+        return {str(tf).upper(): amount for tf, amount in value.items()}
+
+    @field_validator("num_bucket_retention")
+    @classmethod
+    def _validate_retention(cls, value: dict[str, int] | None):
+        if value is None:
+            return None
+        for tf, buckets in value.items():
+            if buckets <= 0:
+                msg = f"Retention buckets for {tf} must be positive."
+                raise ValueError(msg)
+        return value
+
+
+class SymbolNotifierConfig(BaseModel):
+    """Combined configuration for a monitored symbol."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    thresholds: SymbolThresholds = Field(
+        default_factory=SymbolThresholds, description="Threshold definitions per timeframe."
+    )
+    tracker: SymbolTrackerConfig | None = Field(
+        default=None, description="Tracker overrides for this symbol."
+    )
+
+
+class NotificationDispatchSettings(BaseModel):
+    """Runtime dispatch controls for notifier outputs."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    message_interval_seconds: int = Field(
+        default=15, ge=1, description="Interval between notification batches in seconds."
+    )
+
+
+def _default_tracker_settings() -> SymbolTrackerConfig:
+    return SymbolTrackerConfig(
+        cooldown_unit=1,
+        min_buckets_calculation=30,
+        num_bucket_retention={
+            "M1": 60 * 24 * 7 * 4,
+            "M5": 60 * 24 * 7 * 4 // 5,
+            "M30": 60 * 24 * 7 * 4 // 30,
+        },
+    )
+
+
+class NotifierSettings(BaseModel):
+    """Top-level notifier configuration."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    symbols: dict[str, SymbolNotifierConfig] = Field(
+        default_factory=dict, description="Per-symbol notifier configuration."
+    )
+    tracker_defaults: SymbolTrackerConfig = Field(
+        default_factory=_default_tracker_settings,
+        description="Default tracker behaviour applied to each symbol.",
+    )
+    dispatch: NotificationDispatchSettings = Field(
+        default_factory=NotificationDispatchSettings,
+        description="Notification dispatch configuration.",
+    )
+
+    @field_validator("symbols", mode="before")
+    @classmethod
+    def _upper_symbol_keys(cls, value: dict[str, dict] | None):
+        if value is None:
+            return {}
+        return {symbol.upper(): cfg for symbol, cfg in value.items()}
+
+    def symbol_config(self, symbol: str) -> SymbolNotifierConfig | None:
+        """Return config for a symbol, if present."""
+        if not symbol:
+            return None
+        return self.symbols.get(symbol.upper())
+
+    def resolve_tracker_config(self, symbol: str) -> SymbolTrackerConfig:
+        """
+        Merge tracker defaults with optional per-symbol overrides.
+
+        Returns a new SymbolTrackerConfig instance.
+        """
+        base = self.tracker_defaults.model_copy()
+        symbol_cfg = self.symbol_config(symbol)
+        if symbol_cfg and symbol_cfg.tracker is not None:
+            overrides = symbol_cfg.tracker.model_dump(exclude_none=True)
+            base = base.model_copy(update=overrides)
+        return base
+
+    def thresholds_for(self, symbol: str) -> SymbolThresholds | None:
+        """Return threshold configuration for a symbol, if present."""
+        cfg = self.symbol_config(symbol)
+        if cfg is None:
+            return None
+        return cfg.thresholds
+
+
 class LoggingSettings(BaseModel):
     """Standard logging configuration exposed via settings."""
 
@@ -172,6 +322,7 @@ class AppSettings(BaseSettings):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     validation: DataValidationSettings = Field(default_factory=DataValidationSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
+    notifier: NotifierSettings = Field(default_factory=NotifierSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     auto_create_dirs: bool = Field(
         default=True, description="Create required directories automatically on settings load."
