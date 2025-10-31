@@ -1,0 +1,153 @@
+classDiagram
+    %% Enums
+    class StorageBackend {
+        <<enumeration>>
+        CSV
+        SQLITE
+    }
+
+
+    %% Simple Configuration Classes
+    class BrokerSettings {
+        +int brokertime_tz = 0
+    }
+
+    class ZmqSettings {
+        +str host = "localhost"
+        +int push_port = 32768
+        +int pull_port = 32769
+        +int sub_port = 32770
+        +str client_id = "zmq-notifier"
+    }
+
+    class StorageSettings {
+        +Path data_path = "./data"
+        +StorageBackend backend = CSV
+        +bool compression_enabled = true
+        +int retention_days = 180
+        +int flush_interval_minutes = 5
+    }
+
+    class DataValidationSettings {
+        +tuple~str~ supported_symbols
+        +tuple~str~ supported_timeframes
+        +_normalize_timeframes()
+    }
+
+    class NotificationSettings {
+        +bool enabled = false
+        +str|None telegram_bot_token
+        +str|None telegram_chat_id
+    }
+
+    class LoggingSettings {
+        +str level = "INFO"
+        +str fmt
+        +str datefmt
+        +Path log_dir = "./logs"
+        +str file_name = "runtime.log"
+        +int max_bytes
+        +int backup_count
+        +bool console_enabled = true
+        +str|None console_level
+        +str|None file_level
+        +bool propagate = true
+        +dict~str,str~ loggers
+    }
+
+    %% ========================================================================
+    %% NOTIFIER CONFIGURATION HIERARCHY (grouped namespace)
+    %% ========================================================================
+    namespace NotifierHierarchy {
+        class SymbolThresholds {
+            +dict~str,int~ volatility_threshold
+            +dict~str,int~ activity_threshold
+            +_upper_absolute_timeframes()
+        }
+
+        class SymbolTrackerConfig {
+            +int|None cooldown_unit
+            +int|None min_buckets_calculation
+            +dict~str,int~|None num_bucket_retention
+            +_upper_retention_keys()
+            +_validate_retention()
+        }
+
+        class SymbolNotifierConfig {
+            +SymbolThresholds thresholds
+            +SymbolTrackerConfig|None tracker
+        }
+
+        class NotificationDispatchSettings {
+            +int message_interval_seconds = 15
+        }
+
+        class NotifierSettings {
+            +dict~str,SymbolNotifierConfig~ symbols
+            +SymbolTrackerConfig tracker_defaults
+            +NotificationDispatchSettings dispatch
+            +_upper_symbol_keys()
+            +symbol_config(str) SymbolNotifierConfig|None
+            +resolve_tracker_config(str) SymbolTrackerConfig
+            +thresholds_for(str) SymbolThresholds|None
+        }
+    }
+    %% ========================================================================
+
+    %% Top-level Application Settings
+    class AppSettings {
+        +BrokerSettings broker
+        +ZmqSettings zmq
+        +StorageSettings storage
+        +DataValidationSettings validation
+        +NotificationSettings notifications
+        +NotifierSettings notifier
+        +LoggingSettings logging
+        +bool auto_create_dirs = true
+        +_materialise_directories()
+    }
+
+    %% Helper Functions
+    class UtilityFunctions {
+        <<utility>>
+        +_default_tracker_settings() SymbolTrackerConfig
+        +_ensure_directory(Path) Path
+        +_resolve_path(Path) Path
+        +configure_logging(LoggingSettings?) LoggingSettings
+        +get_settings(**overrides) AppSettings
+    }
+
+    class StdoutStreamHandler {
+        <<logging>>
+        +emit(LogRecord)
+    }
+
+    %% Relationships - Simple configs
+    StorageSettings --> StorageBackend : uses
+
+    %% Relationships - Notifier hierarchy (within namespace)
+    SymbolNotifierConfig *-- SymbolThresholds : contains
+    SymbolNotifierConfig o-- SymbolTrackerConfig : optional
+
+    NotifierSettings *-- NotificationDispatchSettings : contains
+    NotifierSettings *-- SymbolTrackerConfig : tracker_defaults
+    NotifierSettings o-- SymbolNotifierConfig : symbols dict
+
+    %% Relationships - AppSettings to all configs
+    AppSettings *-- BrokerSettings : contains
+    AppSettings *-- ZmqSettings : contains
+    AppSettings *-- StorageSettings : contains
+    AppSettings *-- DataValidationSettings : contains
+    AppSettings *-- NotificationSettings : contains
+    AppSettings *-- NotifierSettings : contains
+    AppSettings *-- LoggingSettings : contains
+
+    %% Utility relationships
+    UtilityFunctions ..> SymbolTrackerConfig : creates
+    UtilityFunctions ..> AppSettings : creates
+    UtilityFunctions ..> LoggingSettings : configures
+
+    %% Notes
+    note for NotifierSettings "Contains helper methods to:<br>- Get symbol config<br>- Resolve tracker config with overrides<br>- Get thresholds per symbol"
+    note for AppSettings "Root configuration class<br>Loaded from .env with prefix:<br>ZMQ_NOTIFIER_"
+    note for SymbolTrackerConfig "NOTE: num_bucket_retention<br>REPLACES entire dict when<br>overriding, not merged"
