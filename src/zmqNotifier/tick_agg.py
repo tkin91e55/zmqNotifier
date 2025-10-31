@@ -67,9 +67,11 @@ class BucketedSlidingAggregator:
         agg = BucketedSlidingAggregator(bucket_span=timedelta(minutes=1))
         agg.add(timestamp, price)
 
-        # Query returns (min, max, max_count)
-        min_val, max_val, max_count = agg.query_min_max(num_buckets=60)
+        # Query returns (min, max, direction, max_count)
+        min_val, max_val, direction, max_count = agg.query_min_max(num_buckets=60)
 
+        # direction is only populated for the active bucket (num_buckets=0) and
+        # shows whether the latest extreme is higher or lower than the earlier one.
         # max_count shows the highest tick count from any bucket in the range
         # Useful for identifying most active periods or liquidity analysis
     """
@@ -132,9 +134,9 @@ class BucketedSlidingAggregator:
         # Add to active window
         self._active_window.add(timestamp, value)
 
-    def query_min_max(self, num_buckets: int = 0) -> tuple[float, float, int]:
+    def query_min_max(self, num_buckets: int = 0) -> tuple[float, float, Optional[float], int]:
         """
-        Query min/max/max_count over active bucket + historical time range.
+        Query min/max/direction/max_count over active bucket + historical time range.
 
         Args:
             num_buckets: Number of bucket time spans to look back (0 = active only)
@@ -142,8 +144,11 @@ class BucketedSlidingAggregator:
                         Empty buckets (gaps) are naturally ignored
 
         Returns:
-            (min_value, max_value, max_count) tuple where max_count is the
-            maximum count from any bucket (or active window) in the range
+            (min_value, max_value, direction, max_count) tuple where max_count is the
+            maximum count from any bucket (or active window) in the range. The direction
+            field is a signed delta between the newer and older extreme and is only
+            populated when num_buckets == 0 (active bucket only). For historical queries,
+            direction is None.
 
         Raises:
             ValueError: If num_buckets is negative
@@ -151,16 +156,20 @@ class BucketedSlidingAggregator:
 
         Examples:
             # Active bucket only
-            min_val, max_val, max_count = agg.query_min_max(0)
+            min_val, max_val, direction, max_count = agg.query_min_max(0)
 
             # Last hour (60 one-minute buckets)
-            min_val, max_val, max_count = agg.query_min_max(60)
+            min_val, max_val, direction, max_count = agg.query_min_max(60)
         """
         if num_buckets < 0:
             raise ValueError("num_buckets must be non-negative")
 
         # Start with active window min/max/count
-        min_value, max_value, max_count = self._get_active_window_stats()
+        min_value, min_ts, max_value, max_ts, max_count = self._get_active_window_stats()
+        direction: Optional[float] = None
+
+        if num_buckets == 0 and min_value != inf and max_value != -inf:
+            direction = self._compute_direction(min_value, min_ts, max_value, max_ts)
 
         # Add historical buckets if requested
         if num_buckets > 0:
@@ -168,31 +177,39 @@ class BucketedSlidingAggregator:
             min_value = min(min_value, hist_min)
             max_value = max(max_value, hist_max)
             max_count = max(max_count, hist_max_count)
+            direction = None  # Historical queries do not preserve direction
 
         # Check if we found any data
-        if min_value is inf:
+        if min_value == inf:
             raise LookupError("window is empty")
 
-        return min_value, max_value, max_count
+        return min_value, max_value, direction, max_count
 
     # ========================================================================
     # Active Window Management
     # ========================================================================
 
-    def _get_active_window_stats(self) -> tuple[float, float, int]:
+    def _get_active_window_stats(self) -> tuple[float, Optional[datetime], float, Optional[datetime], int]:
         """
         Get min/max/count from active window.
 
         Returns:
-            (min_value, max_value, count) or (inf, -inf, 0) if empty
+            (min_value, min_timestamp, max_value, max_timestamp, count)
+            or (inf, None, -inf, None, 0) if empty
         """
         try:
-            min_val = float(self._active_window.current_min().value)
-            max_val = float(self._active_window.current_max().value)
+            min_point = self._active_window.current_min()
+            max_point = self._active_window.current_max()
             count = len(self._active_window._points)
-            return min_val, max_val, count
+            return (
+                float(min_point.value),
+                min_point.timestamp,
+                float(max_point.value),
+                max_point.timestamp,
+                count,
+            )
         except LookupError:
-            return inf, -inf, 0
+            return inf, None, -inf, None, 0
 
     def _condense_active_bucket(self) -> None:
         """
@@ -354,3 +371,26 @@ class BucketedSlidingAggregator:
             raise ValueError("timestamps must be non-decreasing")
         if self._active_window._points and timestamp < self._active_window._points[-1].timestamp:
             raise ValueError("timestamps must be non-decreasing")
+
+    # ========================================================================
+    # Direction Helpers
+    # ========================================================================
+
+    @staticmethod
+    def _compute_direction(
+        min_value: float,
+        min_timestamp: Optional[datetime],
+        max_value: float,
+        max_timestamp: Optional[datetime],
+    ) -> float:
+        """
+        Compute the signed delta between the newer and older extremum.
+
+        A positive value indicates the most recent extremum is higher than the
+        earlier one (rising), while a negative value indicates a drop.
+        """
+        if min_timestamp is None or max_timestamp is None:
+            return 0.0
+        if min_timestamp <= max_timestamp:
+            return max_value - min_value
+        return min_value - max_value
