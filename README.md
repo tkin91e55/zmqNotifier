@@ -3,7 +3,7 @@ zmqnotifier
 
 ``zmqnotifier`` is a reference implementation of a modern Python 3.11 project
 that demonstrates how to structure code, documentation, and tooling when
-building agent-focused workflows. The repository highlights an opinionated
+using agentic agent. The repository highlights an opinionated
 setup featuring Poetry for dependency management, Pydantic for validation,
 pytest for testing, and Sphinx for documentation.
 

@@ -30,11 +30,13 @@ class TestSymbolThresholds:
         assert "M5" in thresholds.volatility_threshold
         assert "m1" not in thresholds.volatility_threshold
 
-    def test_zero_threshold_allowed(self):
-        """Zero thresholds should be allowed (means always trigger)."""
-        thresholds = SymbolThresholds(volatility_threshold={"M1": 0}, activity_threshold={"M1": 0})
-        assert thresholds.volatility_threshold["M1"] == 0
-        assert thresholds.activity_threshold["M1"] == 0
+    def test_zero_threshold_rejected(self):
+        """Zero thresholds should be rejected (must be positive)."""
+        with pytest.raises(ValidationError, match="must be greater than 0"):
+            SymbolThresholds(volatility_threshold={"M1": 0})
+
+        with pytest.raises(ValidationError, match="must be greater than 0"):
+            SymbolThresholds(activity_threshold={"M1": 0})
 
     def test_negative_values_turned(self):
         """Negative thresholds should be rejected."""

@@ -34,12 +34,6 @@ classDiagram
         +_normalize_timeframes()
     }
 
-    class NotificationSettings {
-        +bool enabled = false
-        +str|None telegram_bot_token
-        +str|None telegram_chat_id
-    }
-
     class LoggingSettings {
         +str level = "INFO"
         +str fmt
@@ -59,6 +53,11 @@ classDiagram
     %% NOTIFIER CONFIGURATION HIERARCHY (grouped namespace)
     %% ========================================================================
     namespace NotifierHierarchy {
+        class TelegramSettings {
+            +str|None telegram_bot_token
+            +str|None telegram_chat_id
+        }
+
         class SymbolThresholds {
             +dict~str,int~ volatility_threshold
             +dict~str,int~ activity_threshold
@@ -80,6 +79,7 @@ classDiagram
 
         class NotificationDispatchSettings {
             +int message_interval_seconds = 15
+            +TelegramSettings telegram
         }
 
         class NotifierSettings {
@@ -100,7 +100,6 @@ classDiagram
         +ZmqSettings zmq
         +StorageSettings storage
         +DataValidationSettings validation
-        +NotificationSettings notifications
         +NotifierSettings notifier
         +LoggingSettings logging
         +bool auto_create_dirs = true
@@ -129,6 +128,7 @@ classDiagram
     SymbolNotifierConfig *-- SymbolThresholds : contains
     SymbolNotifierConfig o-- SymbolTrackerConfig : optional
 
+    NotificationDispatchSettings *-- TelegramSettings : contains
     NotifierSettings *-- NotificationDispatchSettings : contains
     NotifierSettings *-- SymbolTrackerConfig : tracker_defaults
     NotifierSettings o-- SymbolNotifierConfig : symbols dict
@@ -138,7 +138,6 @@ classDiagram
     AppSettings *-- ZmqSettings : contains
     AppSettings *-- StorageSettings : contains
     AppSettings *-- DataValidationSettings : contains
-    AppSettings *-- NotificationSettings : contains
     AppSettings *-- NotifierSettings : contains
     AppSettings *-- LoggingSettings : contains
 

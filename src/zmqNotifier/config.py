@@ -99,20 +99,6 @@ class DataValidationSettings(BaseModel):
         return tuple(item.upper() for item in value)
 
 
-class NotificationSettings(BaseModel):
-    """Notification channel configuration."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    enabled: bool = Field(default=False, description="Enable/disable all notifications globally.")
-    telegram_bot_token: str | None = Field(
-        default=None, description="Telegram bot token (if Telegram notifications are used)."
-    )
-    telegram_chat_id: str | None = Field(
-        default=None, description="Telegram chat to receive notifications."
-    )
-
-
 class SymbolThresholds(BaseModel):
     """Per-timeframe thresholds for volatility and activity."""
 
@@ -125,7 +111,7 @@ class SymbolThresholds(BaseModel):
         default_factory=dict, description="Activity threshold per timeframe (tick count)."
     )
 
-    @field_validator("volatility_threshold","activity_threshold", mode="before")
+    @field_validator("volatility_threshold", "activity_threshold", mode="before")
     @classmethod
     def _upper_absolute_timeframes(cls, value: dict[str, int] | None):
         """Normalize timeframe keys to uppercase and validate positive values."""
@@ -133,7 +119,11 @@ class SymbolThresholds(BaseModel):
             return {}
         result = {}
         for tf, threshold in value.items():
-            result[str(tf).upper()] = abs(int(threshold))
+            threshold = abs(int(threshold))
+            if threshold <= 0:
+                msg = f"Threshold for {tf} must be greater than 0, got {threshold}"
+                raise ValueError(msg)
+            result[str(tf).upper()] = threshold
         return result
 
 
@@ -190,6 +180,19 @@ class SymbolNotifierConfig(BaseModel):
     )
 
 
+class TelegramSettings(BaseModel):
+    """Telegram notification channel configuration."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    telegram_bot_token: str | None = Field(
+        default=None, description="Telegram bot token (if Telegram notifications are used)."
+    )
+    telegram_chat_id: str | None = Field(
+        default=None, description="Telegram chat to receive notifications."
+    )
+
+
 class NotificationDispatchSettings(BaseModel):
     """Runtime dispatch controls for notifier outputs."""
 
@@ -197,6 +200,12 @@ class NotificationDispatchSettings(BaseModel):
 
     message_interval_seconds: int = Field(
         default=15, ge=1, description="Interval between notification batches in seconds."
+    )
+    telegram: TelegramSettings = Field(
+        default_factory=TelegramSettings, description="Telegram notification configuration."
+    )
+    telegram: TelegramSettings = Field(
+        default_factory=TelegramSettings, description="Telegram notification configuration."
     )
 
 
@@ -321,7 +330,6 @@ class AppSettings(BaseSettings):
     zmq: ZmqSettings = Field(default_factory=ZmqSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     validation: DataValidationSettings = Field(default_factory=DataValidationSettings)
-    notifications: NotificationSettings = Field(default_factory=NotificationSettings)
     notifier: NotifierSettings = Field(default_factory=NotifierSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     auto_create_dirs: bool = Field(

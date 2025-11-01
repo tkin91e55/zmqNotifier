@@ -9,7 +9,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from zmqNotifier.config import NotificationSettings
+from zmqNotifier.config import TelegramSettings
 from zmqNotifier.notification.backends import TelegramNotifier
 
 
@@ -226,7 +226,7 @@ class TestTelegramNotifierFromConfig:
 
     def test_from_config_with_valid_settings(self):
         """Test creating notifier from valid config."""
-        config = NotificationSettings(telegram_bot_token="123:ABC", telegram_chat_id="456")
+        config = TelegramSettings(telegram_bot_token="123:ABC", telegram_chat_id="456")
 
         notifier = TelegramNotifier.from_config(config)
 
@@ -235,28 +235,28 @@ class TestTelegramNotifierFromConfig:
 
     def test_from_config_with_missing_token(self):
         """Test from_config fails when token is missing."""
-        config = NotificationSettings(telegram_bot_token=None, telegram_chat_id="456")
+        config = TelegramSettings(telegram_bot_token=None, telegram_chat_id="456")
 
         with pytest.raises(ValueError, match="telegram_bot_token not configured"):
             TelegramNotifier.from_config(config)
 
     def test_from_config_with_missing_chat_id(self):
         """Test from_config fails when chat_id is missing."""
-        config = NotificationSettings(telegram_bot_token="123:ABC", telegram_chat_id=None)
+        config = TelegramSettings(telegram_bot_token="123:ABC", telegram_chat_id=None)
 
         with pytest.raises(ValueError, match="telegram_chat_id not configured"):
             TelegramNotifier.from_config(config)
 
     def test_from_config_with_empty_token(self):
         """Test from_config fails when token is empty string."""
-        config = NotificationSettings(telegram_bot_token="", telegram_chat_id="456")
+        config = TelegramSettings(telegram_bot_token="", telegram_chat_id="456")
 
         with pytest.raises(ValueError, match="telegram_bot_token not configured"):
             TelegramNotifier.from_config(config)
 
     def test_from_config_with_empty_chat_id(self):
         """Test from_config fails when chat_id is empty string."""
-        config = NotificationSettings(telegram_bot_token="123:ABC", telegram_chat_id="")
+        config = TelegramSettings(telegram_bot_token="123:ABC", telegram_chat_id="")
 
         with pytest.raises(ValueError, match="telegram_chat_id not configured"):
             TelegramNotifier.from_config(config)
