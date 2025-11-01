@@ -7,43 +7,8 @@ from zmqNotifier.config import (
     NotificationDispatchSettings,
     NotifierSettings,
     SymbolNotifierConfig,
-    SymbolThresholds,
     SymbolTrackerConfig,
 )
-
-
-class TestSymbolThresholds:
-    """Test SymbolThresholds validation."""
-
-    def test_empty_thresholds_allowed(self):
-        """Empty threshold dicts should be valid."""
-        thresholds = SymbolThresholds()
-        assert thresholds.volatility_threshold == {}
-        assert thresholds.activity_threshold == {}
-
-    def test_uppercase_timeframe_normalization(self):
-        """Timeframe keys should be normalized to uppercase."""
-        thresholds = SymbolThresholds(
-            volatility_threshold={"m1": 100, "m5": 250}, activity_threshold={"m1": 50, "m5": 150}
-        )
-        assert "M1" in thresholds.volatility_threshold
-        assert "M5" in thresholds.volatility_threshold
-        assert "m1" not in thresholds.volatility_threshold
-
-    def test_zero_threshold_rejected(self):
-        """Zero thresholds should be rejected (must be positive)."""
-        with pytest.raises(ValidationError, match="must be greater than 0"):
-            SymbolThresholds(volatility_threshold={"M1": 0})
-
-        with pytest.raises(ValidationError, match="must be greater than 0"):
-            SymbolThresholds(activity_threshold={"M1": 0})
-
-    def test_negative_values_turned(self):
-        """Negative thresholds should be rejected."""
-        v = SymbolThresholds(volatility_threshold={"M1": -100})
-        a = SymbolThresholds(activity_threshold={"M1": -50})
-        assert v.volatility_threshold["M1"] == 100
-        assert a.activity_threshold["M1"] == 50
 
 
 class TestSymbolTrackerConfig:
@@ -111,20 +76,15 @@ class TestSymbolNotifierConfig:
     """Test SymbolNotifierConfig composition."""
 
     def test_default_empty_thresholds(self):
-        """Default should have empty threshold dicts."""
+        """Default should have empty threshold dict."""
         config = SymbolNotifierConfig()
-        assert config.thresholds.volatility_threshold == {}
-        assert config.thresholds.activity_threshold == {}
+        assert config.thresholds == {}
         assert config.tracker is None
 
     def test_with_thresholds_only(self):
         """Should accept thresholds without tracker config."""
-        config = SymbolNotifierConfig(
-            thresholds=SymbolThresholds(
-                volatility_threshold={"M1": 100}, activity_threshold={"M1": 50}
-            )
-        )
-        assert config.thresholds.volatility_threshold["M1"] == 100
+        config = SymbolNotifierConfig(thresholds={"M1": (100, 50)})
+        assert config.thresholds["M1"] == (100, 50)
         assert config.tracker is None
 
     def test_with_tracker_overrides(self):
@@ -132,6 +92,42 @@ class TestSymbolNotifierConfig:
         config = SymbolNotifierConfig(tracker=SymbolTrackerConfig(cooldown_unit=2))
         assert config.tracker is not None
         assert config.tracker.cooldown_unit == 2
+
+    def test_uppercase_timeframe_normalization(self):
+        """Timeframe keys should be normalized to uppercase."""
+        config = SymbolNotifierConfig(thresholds={"m1": (100, 50), "m5": (250, 150)})
+        assert "M1" in config.thresholds
+        assert "M5" in config.thresholds
+        assert "m1" not in config.thresholds
+
+    def test_zero_volatility_threshold_rejected(self):
+        """Zero volatility threshold should be rejected (must be positive)."""
+        with pytest.raises(ValidationError, match="must be greater than 0"):
+            SymbolNotifierConfig(thresholds={"M1": (0, 100)})
+
+    def test_zero_activity_threshold_rejected(self):
+        """Zero activity threshold should be rejected (must be positive)."""
+        with pytest.raises(ValidationError, match="must be greater than 0"):
+            SymbolNotifierConfig(thresholds={"M1": (100, 0)})
+
+    def test_negative_values_converted_to_positive(self):
+        """Negative thresholds should be converted to positive."""
+        config = SymbolNotifierConfig(thresholds={"M1": (-100, 200), "M5": (100, -50)})
+        assert config.thresholds["M1"] == (100, 200)
+        assert config.thresholds["M5"] == (100, 50)
+
+    def test_invalid_tuple_structure_rejected(self):
+        """Non-tuple threshold values should be rejected."""
+        with pytest.raises(ValidationError, match="must be a tuple/list"):
+            SymbolNotifierConfig(thresholds={"M1": 100})  # type: ignore
+
+    def test_wrong_tuple_length_rejected(self):
+        """Tuples with wrong number of elements should be rejected."""
+        with pytest.raises(ValidationError, match="must have exactly 2 values"):
+            SymbolNotifierConfig(thresholds={"M1": (100,)})  # type: ignore
+
+        with pytest.raises(ValidationError, match="must have exactly 2 values"):
+            SymbolNotifierConfig(thresholds={"M1": (100, 50, 200)})  # type: ignore
 
 
 class TestNotifierSettings:
@@ -180,17 +176,11 @@ class TestNotifierSettings:
     def test_thresholds_for_existing_symbol(self):
         """Should return thresholds for configured symbol."""
         settings = NotifierSettings(
-            symbols={
-                "BTCUSD": SymbolNotifierConfig(
-                    thresholds=SymbolThresholds(
-                        volatility_threshold={"M1": 100}, activity_threshold={"M1": 50}
-                    )
-                )
-            }
+            symbols={"BTCUSD": SymbolNotifierConfig(thresholds={"M1": (100, 50)})}
         )
         thresholds = settings.thresholds_for("BTCUSD")
         assert thresholds is not None
-        assert thresholds.volatility_threshold["M1"] == 100
+        assert thresholds["M1"] == (100, 50)
 
     def test_thresholds_for_missing_symbol(self):
         """Should return None for unconfigured symbol."""
@@ -243,22 +233,14 @@ class TestNotifierSettings:
         settings = NotifierSettings(
             symbols={
                 "BTCUSD": SymbolNotifierConfig(
-                    thresholds=SymbolThresholds(
-                        volatility_threshold={"M1": 100, "M5": 250},
-                        activity_threshold={"M1": 50, "M5": 150},
-                    ),
+                    thresholds={"M1": (100, 50), "M5": (250, 150)},
                     tracker=SymbolTrackerConfig(
                         cooldown_unit=2,
                         min_buckets_calculation=40,
                         num_bucket_retention={"M1": 5000, "M5": 1000},
                     ),
                 ),
-                "EURUSD": SymbolNotifierConfig(
-                    thresholds=SymbolThresholds(
-                        volatility_threshold={"M1": 15, "M5": 40},
-                        activity_threshold={"M1": 100, "M5": 250},
-                    )
-                ),
+                "EURUSD": SymbolNotifierConfig(thresholds={"M1": (15, 100), "M5": (40, 250)}),
             },
             dispatch=NotificationDispatchSettings(message_interval_seconds=20),
         )
@@ -266,7 +248,7 @@ class TestNotifierSettings:
         # BTCUSD checks
         btc_thresholds = settings.thresholds_for("BTCUSD")
         assert btc_thresholds is not None
-        assert btc_thresholds.volatility_threshold["M1"] == 100
+        assert btc_thresholds["M1"] == (100, 50)
         btc_tracker = settings.resolve_tracker_config("BTCUSD")
         assert btc_tracker.cooldown_unit == 2
 

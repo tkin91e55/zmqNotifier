@@ -99,34 +99,6 @@ class DataValidationSettings(BaseModel):
         return tuple(item.upper() for item in value)
 
 
-class SymbolThresholds(BaseModel):
-    """Per-timeframe thresholds for volatility and activity."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    volatility_threshold: dict[str, int] = Field(
-        default_factory=dict, description="Volatility threshold per timeframe (absolute pip steps)."
-    )
-    activity_threshold: dict[str, int] = Field(
-        default_factory=dict, description="Activity threshold per timeframe (tick count)."
-    )
-
-    @field_validator("volatility_threshold", "activity_threshold", mode="before")
-    @classmethod
-    def _upper_absolute_timeframes(cls, value: dict[str, int] | None):
-        """Normalize timeframe keys to uppercase and validate positive values."""
-        if value is None:
-            return {}
-        result = {}
-        for tf, threshold in value.items():
-            threshold = abs(int(threshold))
-            if threshold <= 0:
-                msg = f"Threshold for {tf} must be greater than 0, got {threshold}"
-                raise ValueError(msg)
-            result[str(tf).upper()] = threshold
-        return result
-
-
 class SymbolTrackerConfig(BaseModel):
     """
     Optional overrides for tracker runtime behaviour.
@@ -168,16 +140,63 @@ class SymbolTrackerConfig(BaseModel):
 
 
 class SymbolNotifierConfig(BaseModel):
-    """Combined configuration for a monitored symbol."""
+    """Combined configuration for a monitored symbol.
+
+    Per-timeframe thresholds for volatility and activity.
+    Each timeframe maps to a tuple of (volatility_pips, activity_ticks).
+
+    Example:
+        {
+            "M1": (10, 100),   # 10 pips volatility, 100 ticks activity
+            "M5": (20, 200),   # 20 pips volatility, 200 ticks activity
+        }
+    """
 
     model_config = ConfigDict(extra="ignore")
 
-    thresholds: SymbolThresholds = Field(
-        default_factory=SymbolThresholds, description="Threshold definitions per timeframe."
+    thresholds: dict[str, tuple[int, int]] = Field(
+        default_factory=dict,
+        description="Per-timeframe thresholds: timeframe -> (volatility_pips, activity_ticks).",
     )
     tracker: SymbolTrackerConfig | None = Field(
         default=None, description="Tracker overrides for this symbol."
     )
+
+    @field_validator("thresholds", mode="before")
+    @classmethod
+    def _validate_thresholds(cls, value: dict[str, tuple[int, int]] | None):
+        """Normalize timeframe keys to uppercase and validate threshold values."""
+        if value is None:
+            return {}
+
+        result = {}
+        for tf, thresholds in value.items():
+            tf_upper = str(tf).upper()
+
+            # Validate tuple structure
+            if not isinstance(thresholds, (tuple, list)):
+                msg = f"Threshold for {tf} must be a tuple/list of (volatility, activity), got {type(thresholds)}"
+                raise ValueError(msg)
+
+            if len(thresholds) != 2:
+                msg = f"Threshold for {tf} must have exactly 2 values (volatility, activity), got {len(thresholds)}"
+                raise ValueError(msg)
+
+            # Validate and normalize values
+            vol_threshold = abs(int(thresholds[0]))
+            act_threshold = abs(int(thresholds[1]))
+
+            if vol_threshold <= 0:
+                msg = f"Volatility threshold for {tf} must be greater than 0, got {vol_threshold}"
+                raise ValueError(msg)
+
+            if act_threshold <= 0:
+                msg = f"Activity threshold for {tf} must be greater than 0, got {act_threshold}"
+                raise ValueError(msg)
+
+            result[tf_upper] = (vol_threshold, act_threshold)
+
+        return result
 
 
 class TelegramSettings(BaseModel):
@@ -264,7 +283,7 @@ class NotifierSettings(BaseModel):
             base = base.model_copy(update=overrides)
         return base
 
-    def thresholds_for(self, symbol: str) -> SymbolThresholds | None:
+    def thresholds_for(self, symbol: str) -> dict[str, tuple[int, int]] | None:
         """Return threshold configuration for a symbol, if present."""
         cfg = self.symbol_config(symbol)
         if cfg is None:

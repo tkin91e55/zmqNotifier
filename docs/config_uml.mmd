@@ -58,12 +58,6 @@ classDiagram
             +str|None telegram_chat_id
         }
 
-        class SymbolThresholds {
-            +dict~str,int~ volatility_threshold
-            +dict~str,int~ activity_threshold
-            +_upper_absolute_timeframes()
-        }
-
         class SymbolTrackerConfig {
             +int|None cooldown_unit
             +int|None min_buckets_calculation
@@ -73,8 +67,9 @@ classDiagram
         }
 
         class SymbolNotifierConfig {
-            +SymbolThresholds thresholds
+            +dict~str,tuple~int,int~~ thresholds
             +SymbolTrackerConfig|None tracker
+            +_validate_thresholds()
         }
 
         class NotificationDispatchSettings {
@@ -89,7 +84,7 @@ classDiagram
             +_upper_symbol_keys()
             +symbol_config(str) SymbolNotifierConfig|None
             +resolve_tracker_config(str) SymbolTrackerConfig
-            +thresholds_for(str) SymbolThresholds|None
+            +thresholds_for(str) dict~str,tuple~int,int~~|None
         }
     }
     %% ========================================================================
@@ -125,7 +120,6 @@ classDiagram
     StorageSettings --> StorageBackend : uses
 
     %% Relationships - Notifier hierarchy (within namespace)
-    SymbolNotifierConfig *-- SymbolThresholds : contains
     SymbolNotifierConfig o-- SymbolTrackerConfig : optional
 
     NotificationDispatchSettings *-- TelegramSettings : contains
