@@ -1,19 +1,33 @@
 """
 Notification system for market alerts and monitoring.
-Detects unusual short-term price movement and trade activity for a symbol
 
-Volatility measures ticks counts (activity of trades) and price fluctuations over
-short window.
+Detects unusual short-term price movement and trade activity using multi-dimensional scoring:
+
+Scoring System:
+    - Deep Score: Logarithmic threshold exceedance measuring immediate severity
+      floor(log2(current_value / threshold))
+    - Broad Score: Historical rarity via exponential lookback (1, 2, 4, 8... buckets)
+      checking if current value exceeds 80% of historical data
+    - Combined Scores: volatility_score = volatility_deep × volatility_broad
+                      activity_score = activity_deep × activity_broad
+                      overall_score = volatility_score × (activity_score + 1)
+
+Alert Logic:
+    - Monitors volatility (price fluctuations in pips) and activity (tick count)
+    - Escalation: Higher scores break through active cooldowns
+    - Stepdown: Scores reduce by 1 after cooldown expires without further escalation
+    - Notifications sent only when scores escalate beyond previous levels
+
+The system uses BucketedSlidingAggregator to track historical data across multiple
+timeframes (M1, M5, M30, etc.) for each monitored symbol.
 """
 
 from datetime import datetime, timedelta
 from decimal import Decimal
 import logging
-import math
 
-from dataclasses import dataclass
-from zmqNotifier.tick_agg import BucketedSlidingAggregator
-from zmqNotifier.models import TickData, into_pip
+from zmqNotifier.tick_agg import BucketedSlidingAggregator, AggStates, Message, init_msg_from_scores
+from zmqNotifier.models import TickData
 from zmqNotifier.market_data import get_timeframe_minutes
 from zmqNotifier.config import AppSettings, get_settings, SymbolTrackerConfig
 
@@ -129,54 +143,31 @@ class VolatilityNotifier:
             # Threshold updates take effect immediately on next _calculate() call
 
 
-@dataclass
-class AggStates:
-    """
-    Aggregator state tracking for a symbol/timeframe combination.
-
-    Tracks both current measurements and notification state:
-    - Current volatility (pip_change) and activity (volume/tick count)
-    - Calculated scores based on threshold exceedance
-    - Cooldown timestamps to prevent notification spam
-    - Escalation tracking for higher-severity alerts
-
-    Notification Logic:
-    - When a tick arrives and TF M1 volatility score (v) escalates to 1 (V), enqueue message
-    - After more ticks, if activity score (a) escalates to 1 (A), enqueue message
-    - No duplicate messages for same escalation level during cooldown
-    - Cooldown of a/v is reset by each tick that brings score below threshold (0 < a/v)
-    - If no further escalation after cooldown period, the a/v score reduces by 1 until 0
-
-    The direction field indicates price movement direction ("UP" or "DOWN").
-    """
-
-    volatility_score: int = 0
-    activity_score: int = 0
-    last_volatility_notification: int = -99999  # Timestamp (seconds since epoch)
-    last_activity_notification: int = -99999
-
-    def magnitude(self) -> int:
-        """
-        Calculate combined magnitude of volatility and activity scores.
-
-        Returns a weighted score where volatility is amplified by activity level.
-        Higher magnitude indicates more urgent notification priority.
-        """
-        return self.volatility_score * (self.activity_score + 1)
-
-
 class SymbolTracker:
     """
-    Per symbol, it book-keeps a few short window aggregators, e.g. M1, M5, M30
-    Implement cooldown/scores tracking per symbol/timeframe
+    Per-symbol aggregator manager with multi-timeframe scoring and cooldown tracking.
 
-    1. It has a few small window pipelines: M1, M5, M30. Each pipeline employs an
-       BucketedSlidingAggregator to keep track of min/max prices in that window.
-       And each BucketedSlidingAggregator keep a long span (retention, a few months
-       Heuristically, a few weeks there is a volcanic change.
-    5. Built aggregators over the small windows, then it measures the largest activities since
-       the past time-span. It is like how the observatory or statisical approach report rarity of
-       events.
+    Manages BucketedSlidingAggregators for multiple timeframes (M1, M5, M30) to:
+    1. Track min/max prices and tick counts across short windows
+    2. Retain historical data in long-span buckets (configurable retention)
+    3. Calculate multi-dimensional scores comparing current vs. historical data
+    4. Apply escalation/cooldown logic to prevent notification spam
+
+    The tracker maintains both aggregator state (price/tick data) and notification
+    state (scores, cooldown timestamps) for each timeframe.
+
+    Scoring Approach:
+        - Each timeframe independently calculates volatility and activity scores
+        - Scores are based on both magnitude (deep) and rarity (broad)
+        - Higher scores represent more unusual market conditions
+        - Escalation allows important alerts to break through cooldowns
+
+    Example:
+        M1 aggregator sees 10-pip movement exceeding threshold of 5 pips,
+        and this movement exceeds 80% of historical data in last 4 buckets:
+        - volatility_deep = floor(log2(10/5)) = 1
+        - volatility_broad = 3 (spans checked: 1, 2, 4)
+        - volatility_score = 1 × 3 = 3
     """
 
     def __init__(self, symbol: str, master: "VolatilityNotifier"):
@@ -230,40 +221,37 @@ class SymbolTracker:
 
     def _calculate(self, now: datetime) -> None:
         """
-        Calculate volatility and activity scores across all timeframes.
+        Calculate multi-dimensional scores and emit notifications for threshold breaches.
 
-        2. Compares current measures against master's thresholds
-           About score and message:
-           The algorithm that calculates a vector score based on how much the volatility and activity
-           exceed and how significant since the past time-span. Using expoential for scoring.
-           e.g. V= log_threshold(volatility_now) x log_2(past_timespan_that_80percentile(volatility_now))
-           similarly for acitivity
+        For each timeframe aggregator:
+        1. Verifies minimum bucket requirement is met
+        2. Calculates Message with deep/broad scores via init_msg_from_scores()
+        3. Checks if scores represent escalation via AggStates.should_notify()
+        4. Updates cooldown state and enqueues notification if escalated
 
-           enqueue to notification manager
-           if exceeded either volatility/activity exceed thresholds for escalating
-           levels givin the small time window cooldown. e.g. V = 1 send once, V=1.5, not sent within
-           trigger cooldown, but if within cooldown, V>=2, send again... and trigger cooldown again
-           The short message title is like BTCUSD M1 V5 A3 + GBPUSD M5 V1 A2
+        Scoring Algorithm:
+            Deep Score (immediate severity):
+                volatility_deep = floor(log2(pip_change / threshold))
+                activity_deep = floor(log2(tick_count / threshold))
 
-        3 Applies scoring and cooldown logic to decide when to emit a notification burst.
-        4. Forwards alert messages through a single NofitificationManager using Telegram as backend.
-        6. aggregators should store enough history buckets like 30
+            Broad Score (historical rarity):
+                Exponential lookback checking 1, 2, 4, 8... buckets
+                until finding span where current value DOES NOT exceed
+                80% of historical maximum
 
-        Compares current aggregator metrics against configured thresholds,
-        applies cooldown logic, and returns AggStates if notification warranted.
+            Combined:
+                volatility_score = volatility_deep × volatility_broad
+                activity_score = activity_deep × activity_broad
+                overall_score = volatility_score × (activity_score + 1)
+
+        Escalation Logic:
+            - Notification sent when either volatility or activity score increases
+            - Higher scores break through active cooldowns
+            - State updated to new maximum scores
+            - Well-formed messages logged and queued for NotificationManager
 
         Args:
-            timestamp: Current tick timestamp for cooldown checking
-
-        Returns:
-            AggStates object if any threshold exceeded, None otherwise
-
-        Scoring Logic:
-            - Volatility score: log2(pip_change / threshold) rounded up
-            - Activity score:   log2(tick_count / threshold) rounded up
-            - Both scores capped at 0 minimum
-            - Cooldown prevents repeated notifications within cooldown_unit × timeframe
-            - Escalation: Higher scores can break through active cooldown
+            now: Current tick timestamp for scoring and cooldown checking
         """
 
         thresholds = self.thresholds
@@ -271,60 +259,35 @@ class SymbolTracker:
             return
 
         tracker_config = self.tracker
-        current_timestamp = int(now.timestamp())
-        cooldown_unit = tracker_config.cooldown_unit
-        min_buckets = tracker_config.min_buckets_calculation
 
         for tf, agg in self._aggregators.items():
+            min_buckets_requirement = tracker_config.min_buckets_calculation
+            if agg.buckets_count < min_buckets_requirement:
+                continue
+
             state = self._agg_states[tf]
-            vol_threshold, act_threshold = thresholds.get(tf, (None, None))
-            if vol_threshold is None or act_threshold is None:
-                continue
-            if agg.buckets_count < min_buckets:
-                continue
+            msg = init_msg_from_scores(agg=agg, thresholds=thresholds.get(tf, (None, None)))
 
-            # Get current measures
-            _min, _max, tick_cnt = agg.query_min_max()
-            price_change = _max - _min
-            # Convert price difference to pips using symbol-specific multiplier
-            pip_change = into_pip(price_change)
+            state.stepdown(now)
+            if not msg.is_significant():
+                continue  # early leave
 
-            # Calculate scores using log2
-            # Score = floor(log2(current / threshold)), minimum 0
-            volatility_score = (
-                max(0, math.floor(math.log2(pip_change / vol_threshold)))
-                if pip_change >= vol_threshold
-                else 0
-            )
-            # Check if either score triggers notification
-            if volatility_score == 0:
+            state.trigger(now)  # msg is significant, postpone stepdown
+            if not state.should_notify(msg):
                 continue
 
-            # Cooldown logic with escalation
-            cooldown_seconds = cooldown_unit * self._get_timeframe_seconds(tf)
+            state.update(msg, now)
 
-            # Check volatility notification
-            if volatility_score > 0:
-                time_since_last = current_timestamp - state.last_volatility_notification
-                # Notify if: no prior notification, cooldown expired, or score escalated
-                if (
-                    state.last_volatility_notification == -99999
-                    or time_since_last >= cooldown_seconds
-                    or volatility_score > state.volatility_score
-                ):
-                    state.volatility_score = volatility_score
-                    state.last_volatility_notification = current_timestamp
-                    # TODO: Enqueue to NotificationManager
-                    logger.info(
-                        "Volatility alert: %s %s V%d (pip_change=%d, threshold=%d)",
-                        self._symbol,
-                        tf,
-                        volatility_score,
-                        pip_change,
-                        vol_threshold,
-                    )
+            msg.symbol = self._symbol
+            msg.timeframe = tf
+            msg.time = now
+            msg.direction = "UP" if agg.get_active_direction() > 0 else "DOWN"
 
-    def _get_timeframe_seconds(self, tf: str) -> float:
+            if msg.is_well_formed():
+                logger.info("Escalated alert for %s", msg)
+                # TODO: Enqueue to NotificationManager
+
+    def _get_timeframe_seconds(self, tf: str) -> int:
         """Convert timeframe code to seconds."""
         from zmqNotifier.market_data import get_timeframe_minutes
 
@@ -349,7 +312,9 @@ class SymbolTracker:
         self._aggregators[tf] = BucketedSlidingAggregator(
             bucket_span=bucket_span, max_window=max_window
         )
-        self._agg_states[tf] = AggStates()
+        cooldown_unit = tracker_config.cooldown_unit
+        cooldown_seconds = cooldown_unit * self._get_timeframe_seconds(tf)
+        self._agg_states[tf] = AggStates(cooldown_seconds=cooldown_seconds)
 
         logger.debug(
             "Added aggregator for %s/%s with bucket_span=%s, max_window=%s",
@@ -409,7 +374,7 @@ class NotificationManager:
         # initialize time for flush
         pass
 
-    def enqueue(self, state: AggStates):
+    def enqueue(self, msg: Message):
         """
         Add an AggStates notification to the priority queue.
 

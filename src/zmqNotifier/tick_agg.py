@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 from decimal import Decimal
+import math
 
 from zmqNotifier.segment_tree import SegmentTreeMinMax
 from zmqNotifier.sliding_windows import SlidingWindowMinMax
@@ -429,3 +430,247 @@ class BucketedSlidingAggregator:
         if min_timestamp <= max_timestamp:
             return max_value - min_value
         return min_value - max_value
+
+
+# ============================================================================
+# Scoring System - Alert Message and State Management
+# ============================================================================
+
+
+@dataclass
+class AggStates:
+    """
+    Aggregator state tracking for a symbol/timeframe combination.
+
+    Tracks both current measurements and notification state:
+    - Current volatility (pip_change) and activity (volume/tick count)
+    - Calculated scores based on threshold exceedance
+    - Cooldown timestamps to prevent notification spam
+    - Escalation tracking for higher-severity alerts
+
+    Notification Logic:
+    - When a tick arrives and TF M1 volatility score (v) escalates to 1 (V), enqueue message
+    - After more ticks, if activity score (a) escalates to 1 (A), enqueue message
+    - No duplicate messages for same escalation level during cooldown
+    - Cooldown of a/v is reset by each tick that brings score below threshold (0 < a/v)
+    - If no further escalation after cooldown period, the a/v score reduces by 1 until 0
+
+    The direction field indicates price movement direction ("UP" or "DOWN").
+    """
+
+    cooldown_seconds: int
+    volatility_score: int = 0
+    activity_score: int = 0
+    _last_mod: int = -99999  # Timestamp (seconds since epoch)
+
+    def update(self, msg: "Message", now: datetime):
+        """
+        Update state with new message, applying escalation logic.
+
+        Args:
+            msg: New message with current scores
+            now: Current timestamp
+        """
+        if msg.volatility_score > self.volatility_score:
+            self.volatility_score = msg.volatility_score
+        if msg.activity_score > self.activity_score:
+            self.activity_score = msg.activity_score
+
+    def should_notify(self, msg: "Message") -> bool:
+        return (
+            msg.volatility_score > self.volatility_score or msg.activity_score > self.activity_score
+        )
+
+    def trigger(self, now: datetime):
+        """reset the coutdown timer on escalation"""
+        current_timestamp = int(now.timestamp())
+        self._last_mod = current_timestamp
+
+    def stepdown(self, now: datetime):
+        """
+        Reduce scores by 1 after cooldown expires if no further escalation.
+
+        Args:
+            now: Current timestamp
+        """
+        # if no further escalation after cooldown, reduce scores by 1 until 0
+        current_timestamp = int(now.timestamp())
+        time_since_last = current_timestamp - self._last_mod
+        if time_since_last >= self.cooldown_seconds:
+            self.volatility_score = max(0, self.volatility_score - 1)
+            self.activity_score = max(0, self.activity_score - 1)
+            self._last_mod = current_timestamp
+
+
+@dataclass
+class Message:
+    """
+    Alert message with multi-dimensional scoring for volatility and activity.
+
+    Scoring System:
+    - Deep Score: Exponential threshold exceedance using floor(log2(current/threshold))
+    - Broad Score: Historical significance via exponential lookback (1, 2, 4, 8... buckets)
+      - Checks if current value exceeds 80% of historical data in each lookback window
+    - Final Score: volatility_score × (activity_score + 1)
+      where volatility_score = volatility_deep × volatility_broad
+      and activity_score = activity_deep × activity_broad
+
+    The multi-dimensional approach captures both:
+    1. Magnitude (how much threshold is exceeded)
+    2. Rarity (how unusual this is compared to recent history)
+
+    Attributes:
+        symbol: Trading symbol (e.g., 'EURUSD', 'BTCUSD')
+        timeframe: Time period (e.g., 'M1', 'M5', 'M30')
+        time: Timestamp of the alert
+        direction: Price movement direction ("UP" or "DOWN")
+        price_change: Absolute price change in the timeframe
+        tick_count: Number of ticks in the timeframe
+        volatility_deep: Log2 score of price change vs threshold
+        volatility_broad: Historical span score for price change
+        activity_deep: Log2 score of tick count vs threshold
+        activity_broad: Historical span score for tick count
+    """
+
+    symbol: str | None = None
+    timeframe: str | None = None
+    time: datetime | None = None
+    direction: str | None = None
+    price_change: Decimal | None = None
+    tick_count: int | None = None
+    volatility_deep: int = 0
+    volatility_broad: int = 1
+    activity_deep: int = 0
+    activity_broad: int = 1
+
+    @property
+    def volatility_score(self) -> int:
+        """Combined volatility score (deep × broad)."""
+        return self.volatility_deep * self.volatility_broad
+
+    @property
+    def activity_score(self) -> int:
+        """Combined activity score (deep × broad)."""
+        return self.activity_deep * self.activity_broad
+
+    @property
+    def score(self) -> int:
+        """Overall alert severity score."""
+        return self.volatility_score * (self.activity_score + 1)
+
+    def is_significant(self) -> bool:
+        """Check if message represents a significant alert (any score > 0)."""
+        return self.volatility_score > 0 or self.activity_score > 0
+
+    def is_well_formed(self) -> bool:
+        """Validate that all required fields are populated."""
+        return (
+            self.symbol is not None
+            and self.timeframe is not None
+            and self.time is not None
+            and self.direction is not None
+            and self.price_change is not None
+            and self.tick_count is not None
+        )
+
+
+# Scoring thresholds for historical comparison
+V_RATIO_THRESHOLD, A_RATIO_THRESHOLD = Decimal(0.8), Decimal(0.8)
+
+
+def init_msg_from_scores(agg: BucketedSlidingAggregator, thresholds: tuple) -> Message:
+    """
+    Calculate multi-dimensional scores from aggregator data.
+
+    This function implements the core scoring algorithm:
+    1. Deep Score: Logarithmic threshold exceedance (immediate severity)
+    2. Broad Score: Exponential lookback comparison (historical rarity)
+
+    The broad score checks exponentially increasing lookback windows (1, 2, 4, 8...)
+    until finding historical data where 80% of values are below the current value.
+    This captures how unusual the current measurement is compared to recent history.
+
+    Args:
+        agg: BucketedSlidingAggregator (read-only, not mutated)
+        thresholds: (volatility_threshold, activity_threshold) tuple
+
+    Returns:
+        Message with calculated scores, or empty Message if thresholds are None
+
+    Examples:
+        # Current pip_change = 10, threshold = 5
+        # volatility_deep = floor(log2(10/5)) = 1
+
+        # Current change exceeds 80% of last 4 buckets but not last 8
+        # volatility_broad = 3 (spans: 1, 2, 4)
+        # volatility_score = 1 × 3 = 3
+    """
+    msg = Message()
+    vol_threshold, act_threshold = thresholds
+    if vol_threshold is None or act_threshold is None:
+        return msg
+
+    _min, _max, tick_cnt = agg.query_min_max()
+    price_change = _max - _min
+    msg.price_change = price_change
+    msg.tick_count = tick_cnt
+
+    # Import here to avoid circular dependency
+    from zmqNotifier.models import into_pip
+
+    pip_change = into_pip(price_change)
+
+    def log_score(change, threshold):
+        """Calculate logarithmic score for threshold exceedance."""
+        return max(0, math.floor(math.log2(change / threshold))) if change >= threshold else 0
+
+    volatility_deep = log_score(pip_change, vol_threshold)
+    activity_deep = log_score(tick_cnt, act_threshold)
+
+    def calc_span_score(change, ratio_threshold, agg, item_getter):
+        """
+        Calculate historical span score via exponential lookback.
+
+        Checks lookback windows of size 1, 2, 4, 8... buckets until finding
+        a window where the current change does NOT exceed ratio_threshold
+        of the historical maximum.
+
+        Args:
+            change: Current value to compare
+            ratio_threshold: Percentage threshold (e.g., 0.8 for 80%)
+            agg: BucketedSlidingAggregator to query
+            item_getter: Function to extract value from (min, max, count) tuple
+
+        Returns:
+            Span score (number of exponential windows exceeded)
+        """
+        span_score, i = 1, 1
+        while i < agg.buckets_count:
+            max_span = item_getter(agg.query_min_max(i))
+            if max_span * ratio_threshold >= change:
+                span_score, i = span_score + 1, i * 2
+            else:
+                break
+        return span_score
+
+    if volatility_deep > 0:
+        v_span_score = calc_span_score(
+            price_change,
+            V_RATIO_THRESHOLD,
+            agg,
+            item_getter=lambda t: t[1] - t[0],  # min,max,count
+        )
+        msg.volatility_deep = volatility_deep
+        msg.volatility_broad = v_span_score
+
+    if activity_deep > 0:
+        a_span_score = calc_span_score(
+            tick_cnt,
+            A_RATIO_THRESHOLD,
+            agg,
+            item_getter=lambda t: t[2],  # min,max,count
+        )
+        msg.activity_deep = activity_deep
+        msg.activity_broad = a_span_score
+
+    return msg

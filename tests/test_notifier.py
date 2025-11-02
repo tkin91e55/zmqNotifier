@@ -441,22 +441,6 @@ class TestSymbolTracker:
         assert "M30" in tracker._aggregators
 
 
-class TestAggStates:
-    """Test cases for AggStates dataclass."""
-
-    def test_magnitude_calculation(self):
-        """magnitude should correctly calculate combined score."""
-        state = AggStates(volatility_score=2, activity_score=1)
-        # magnitude = volatility_score * (activity_score + 1) = 2 * (1 + 1) = 4
-        assert state.magnitude() == 4
-
-    def test_magnitude_zero_activity(self):
-        """magnitude should handle zero activity score."""
-        state = AggStates(volatility_score=3, activity_score=0)
-        # magnitude = 3 * (0 + 1) = 3
-        assert state.magnitude() == 3
-
-
 class TestSymbolTrackerOnTick:
     """Test cases for SymbolTracker.on_tick() and _calculate()."""
 
@@ -534,8 +518,8 @@ class TestSymbolTrackerOnTick:
             )
         )
 
-        assert caplog.text.count("Volatility alert") == 1
-        first_notification_time = tracker._agg_states["M1"].last_volatility_notification
+        assert caplog.text.count("Escalated alert") == 1
+        first_notification_time = tracker._agg_states["M1"]._last_mod
 
         caplog.clear()
 
@@ -555,8 +539,8 @@ class TestSymbolTrackerOnTick:
             )
         )
 
-        assert "Volatility alert" not in caplog.text
-        assert tracker._agg_states["M1"].last_volatility_notification == first_notification_time
+        assert "Escalated alert" not in caplog.text
+        assert tracker._agg_states["M1"]._last_mod == first_notification_time
 
     def test_escalation_breaks_cooldown(self, tracker_with_config, caplog):
         """Higher score should break through active cooldown."""
@@ -589,7 +573,7 @@ class TestSymbolTrackerOnTick:
         )
 
         assert tracker._agg_states["M1"].volatility_score == 1
-        assert caplog.text.count("Volatility alert") == 1
+        assert caplog.text.count("Escalated alert") == 1
 
         caplog.clear()
 
@@ -610,7 +594,7 @@ class TestSymbolTrackerOnTick:
         )
 
         assert tracker._agg_states["M1"].volatility_score == 2
-        assert caplog.text.count("Volatility alert") == 1
+        assert caplog.text.count("Escalated alert") == 1
 
     def test_cooldown_expires_allows_renotification(self, tracker_with_config, caplog):
         """After cooldown expires, same score should trigger new notification."""
@@ -640,7 +624,7 @@ class TestSymbolTrackerOnTick:
             )
         )
 
-        assert caplog.text.count("Volatility alert") == 1
+        assert caplog.text.count("Escalated alert") == 1
 
         caplog.clear()
 
@@ -661,7 +645,7 @@ class TestSymbolTrackerOnTick:
             )
         )
 
-        assert caplog.text.count("Volatility alert") == 1
+        assert caplog.text.count("Escalated alert") == 1
 
     def test_insufficient_history_no_scoring(self, tracker_with_config):
         """Insufficient bucket history should prevent scoring."""
@@ -692,7 +676,7 @@ class TestSymbolTrackerOnTick:
         state = tracker._agg_states["M1"]
         # Should remain at initial values (no notification)
         assert state.volatility_score == 0
-        assert state.last_volatility_notification == -99999
+        assert state._last_mod == -99999
 
 
 class TestVolatilityNotifierOnTick:
