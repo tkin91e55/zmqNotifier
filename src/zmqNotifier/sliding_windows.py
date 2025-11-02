@@ -19,7 +19,7 @@ from decimal import Decimal
 @dataclass
 class WindowPoint:
     timestamp: datetime
-    value: int|float|Decimal
+    value: Decimal
 
 
 class SlidingWindowMinMax:
@@ -36,9 +36,11 @@ class SlidingWindowMinMax:
         self._min_candidates: Deque[WindowPoint] = deque()
         self._max_candidates: Deque[WindowPoint] = deque()
 
-    def add(self, timestamp: datetime, value) -> None:
+    def add(self, timestamp: datetime, value: Decimal) -> None:
         if self._points and timestamp < self._points[-1].timestamp:
             raise ValueError("timestamps must be non-decreasing")
+        if not isinstance(value, Decimal):
+            value = Decimal(str(value))
         point = WindowPoint(timestamp, value)
         self._points.append(point)
 
@@ -71,8 +73,10 @@ class SlidingWindowMinMax:
             if self._max_candidates and self._max_candidates[0] is expired:
                 self._max_candidates.popleft()
 
+
 from heapq import heappop, heappush
 from typing import Deque
+
 
 class SlidingWindowMinMaxHeap:
     """
@@ -86,15 +90,17 @@ class SlidingWindowMinMaxHeap:
             raise ValueError("window must be positive")
         self._window = window
         self._entries: Deque[tuple[datetime, int]] = deque()
-        self._min_heap: list[tuple[float, int, datetime]] = []
-        self._max_heap: list[tuple[float, int, datetime]] = []
-        self._valid_ids: dict[int, tuple[datetime, float]] = {}
+        self._min_heap: list[tuple[Decimal, int, datetime]] = []
+        self._max_heap: list[tuple[Decimal, int, datetime]] = []
+        self._valid_ids: dict[int, tuple[datetime, Decimal]] = {}
         self._next_id = 0
         self._last_timestamp: datetime | None = None
 
-    def add(self, timestamp: datetime, value: float) -> None:
+    def add(self, timestamp: datetime, value: Decimal) -> None:
         if self._last_timestamp and timestamp < self._last_timestamp:
             raise ValueError("timestamps must be non-decreasing")
+        if not isinstance(value, Decimal):
+            value = Decimal(str(value))
         self._last_timestamp = timestamp
 
         entry_id = self._next_id
@@ -119,7 +125,7 @@ class SlidingWindowMinMaxHeap:
         self._prune(self._max_heap)
         if not self._max_heap:
             raise LookupError("window is empty")
-        wp = WindowPoint(self._min_heap[0][2], -self._max_heap[0][0])
+        wp = WindowPoint(self._max_heap[0][2], -self._max_heap[0][0])
         return wp
 
     def _expire(self, now: datetime) -> None:
@@ -130,9 +136,10 @@ class SlidingWindowMinMaxHeap:
         self._prune(self._min_heap)
         self._prune(self._max_heap)
 
-    def _prune(self, heap: list[tuple[float, int, datetime]]) -> None:
+    def _prune(self, heap: list[tuple[Decimal, int, datetime]]) -> None:
         while heap and heap[0][1] not in self._valid_ids:
             heappop(heap)
+
 
 """
 Q: it seems max and min Treaps directly solve for each small time window, but too complex

@@ -14,12 +14,12 @@ from zmqNotifier.config import (
 class TestSymbolTrackerConfig:
     """Test SymbolTrackerConfig validation."""
 
-    def test_all_fields_optional(self):
-        """All tracker config fields should be optional."""
+    def test_all_fields_have_defaults(self):
+        """All tracker config fields should have sensible defaults."""
         config = SymbolTrackerConfig()
-        assert config.cooldown_unit is None
-        assert config.min_buckets_calculation is None
-        assert config.num_bucket_retention is None
+        assert config.cooldown_unit == 1
+        assert config.min_buckets_calculation == 30
+        assert config.num_bucket_retention == {}
 
     def test_positive_cooldown_unit(self):
         """Cooldown unit must be positive."""

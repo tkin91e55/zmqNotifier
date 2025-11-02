@@ -6,11 +6,14 @@ querying minimum, maximum, and max count values over arbitrary ranges in O(log n
 """
 
 from collections import deque
-from math import inf
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from zmqNotifier.tick_agg import Bucket
+
+DECIMAL_POS_INF = Decimal("Infinity")
+DECIMAL_NEG_INF = Decimal("-Infinity")
 
 
 class SegmentTreeMinMax:
@@ -38,16 +41,16 @@ class SegmentTreeMinMax:
         self._n = len(buckets)
 
         if self._n == 0:
-            self._tree: list[tuple[float, float, int]] = []
+            self._tree: list[tuple[Decimal, Decimal, int]] = []
             return
 
         # Allocate tree array (4n is conservative but handles all cases)
-        self._tree = [(inf, -inf, 0)] * (4 * self._n)
+        self._tree = [(DECIMAL_POS_INF, DECIMAL_NEG_INF, 0)] * (4 * self._n)
 
         # Build tree recursively from buckets
         self._build(buckets, node=0, start=0, end=self._n - 1)
 
-    def query(self, left_idx: int, right_idx: int) -> tuple[float, float, int]:
+    def query(self, left_idx: int, right_idx: int) -> tuple[Decimal, Decimal, int]:
         """
         Query min/max/max_count over bucket index range in O(log n) time.
 
@@ -62,7 +65,7 @@ class SegmentTreeMinMax:
             ValueError: If indices are out of bounds or invalid
         """
         if self._n == 0:
-            return inf, -inf, 0
+            return DECIMAL_POS_INF, DECIMAL_NEG_INF, 0
 
         self._validate_range(left_idx, right_idx)
         return self._query_range(
@@ -98,7 +101,7 @@ class SegmentTreeMinMax:
 
     def _query_range(
         self, node: int, node_start: int, node_end: int, query_left: int, query_right: int
-    ) -> tuple[float, float, int]:
+    ) -> tuple[Decimal, Decimal, int]:
         """
         Recursive range query helper.
 
@@ -114,7 +117,7 @@ class SegmentTreeMinMax:
         """
         # No overlap - return neutral values
         if query_right < node_start or query_left > node_end:
-            return inf, -inf, 0
+            return DECIMAL_POS_INF, DECIMAL_NEG_INF, 0
 
         # Complete overlap - return node value directly
         if query_left <= node_start and node_end <= query_right:
@@ -130,8 +133,8 @@ class SegmentTreeMinMax:
         return self._merge_values(left_result, right_result)
 
     def _merge_values(
-        self, left: tuple[float, float, int], right: tuple[float, float, int]
-    ) -> tuple[float, float, int]:
+        self, left: tuple[Decimal, Decimal, int], right: tuple[Decimal, Decimal, int]
+    ) -> tuple[Decimal, Decimal, int]:
         """
         Merge two (min, max, max_count) tuples.
 

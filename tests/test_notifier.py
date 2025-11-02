@@ -447,11 +447,6 @@ class TestAggStates:
     def test_magnitude_calculation(self):
         """magnitude should correctly calculate combined score."""
         state = AggStates(
-            symbol="EURUSD",
-            timeframe="M1",
-            direction="UP",
-            pip_change=20,
-            volume=100,
             volatility_score=2,
             activity_score=1,
         )
@@ -461,11 +456,6 @@ class TestAggStates:
     def test_magnitude_zero_activity(self):
         """magnitude should handle zero activity score."""
         state = AggStates(
-            symbol="EURUSD",
-            timeframe="M1",
-            direction="UP",
-            pip_change=20,
-            volume=100,
             volatility_score=3,
             activity_score=0,
         )
@@ -503,10 +493,10 @@ class TestSymbolTrackerOnTick:
 
         # Verify aggregator received the tick
         agg = tracker_with_config._aggregators["M1"]
-        min_val, max_val, direction, count = agg.query_min_max(num_buckets=0)
+        min_val, max_val, count = agg.query_min_max(num_buckets=0)
 
-        assert min_val == 1.1001  # Mid-price
-        assert max_val == 1.1001
+        assert min_val == Decimal("1.1001")  # Mid-price
+        assert max_val == Decimal("1.1001")
         assert count == 1
 
     def test_on_tick_no_aggregators(self, minimal_config):
@@ -549,10 +539,10 @@ class TestVolatilityNotifierOnTick:
         # Verify tracker received the tick
         tracker = notifier._trackers["EURUSD"]
         agg = tracker._aggregators["M1"]
-        min_val, max_val, _, count = agg.query_min_max(num_buckets=0)
+        min_val, max_val, count = agg.query_min_max(num_buckets=0)
 
         assert count == 1
-        assert min_val == 1.1001
+        assert min_val == Decimal("1.1001")
 
     def test_on_tick_unknown_symbol(self, minimal_config, caplog):
         """on_tick should warn for unknown symbol."""

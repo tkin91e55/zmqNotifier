@@ -109,14 +109,14 @@ class SymbolTrackerConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    cooldown_unit: int | None = Field(
-        default=None, gt=0, description="Cooldown unit expressed in timeframe multiples."
+    cooldown_unit: int = Field(
+        default=1, gt=0, description="Cooldown unit expressed in timeframe multiples."
     )
-    min_buckets_calculation: int | None = Field(
-        default=None, gt=0, description="Minimum historical buckets to consider when scoring."
+    min_buckets_calculation: int  = Field(
+        default=30, gt=0, description="Minimum historical buckets to consider when scoring."
     )
-    num_bucket_retention: dict[str, int] | None = Field(
-        default=None,
+    num_bucket_retention: dict[str, int] = Field(
+        default={},
         description="Override bucket retention per timeframe. REPLACES defaults entirely.",
     )
 

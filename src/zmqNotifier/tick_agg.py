@@ -12,11 +12,14 @@ This module provides a high-performance tick aggregator that:
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from math import inf
 from typing import Optional
+from decimal import Decimal
 
 from zmqNotifier.segment_tree import SegmentTreeMinMax
 from zmqNotifier.sliding_windows import SlidingWindowMinMax
+
+DECIMAL_POS_INF = Decimal("Infinity")
+DECIMAL_NEG_INF = Decimal("-Infinity")
 
 
 # ============================================================================
@@ -35,8 +38,8 @@ class Bucket:
 
     start: datetime
     end: datetime
-    min_value: float = inf
-    max_value: float = -inf
+    min_value: Decimal = DECIMAL_POS_INF
+    max_value: Decimal = DECIMAL_NEG_INF
     count: int = 0
 
     @property
@@ -67,11 +70,12 @@ class BucketedSlidingAggregator:
         agg = BucketedSlidingAggregator(bucket_span=timedelta(minutes=1))
         agg.add(timestamp, price)
 
-        # Query returns (min, max, direction, max_count)
-        min_val, max_val, direction, max_count = agg.query_min_max(num_buckets=60)
+        # Query returns (min, max, max_count)
+        min_val, max_val, max_count = agg.query_min_max(num_buckets=60)
 
-        # direction is only populated for the active bucket (num_buckets=0) and
-        # shows whether the latest extreme is higher or lower than the earlier one.
+        # Get direction for active bucket only
+        direction = agg.get_active_direction()  # Positive = rising, negative = falling
+
         # max_count shows the highest tick count from any bucket in the range
         # Useful for identifying most active periods or liquidity analysis
     """
@@ -105,7 +109,7 @@ class BucketedSlidingAggregator:
     # Public API
     # ========================================================================
 
-    def add(self, timestamp: datetime, value: float) -> None:
+    def add(self, timestamp: datetime, value: Decimal) -> None:
         """
         Add a tick to the aggregator.
 
@@ -119,6 +123,8 @@ class BucketedSlidingAggregator:
             ValueError: If timestamp is not non-decreasing
         """
         self._validate_timestamp(timestamp)
+        if not isinstance(value, Decimal):
+            value = Decimal(str(value))
 
         bucket_start = self._align_to_bucket_boundary(timestamp)
 
@@ -134,9 +140,9 @@ class BucketedSlidingAggregator:
         # Add to active window
         self._active_window.add(timestamp, value)
 
-    def query_min_max(self, num_buckets: int = 0) -> tuple[float, float, Optional[float], int]:
+    def query_min_max(self, num_buckets: int = 0) -> tuple[Decimal, Decimal, int]:
         """
-        Query min/max/direction/max_count over active bucket + historical time range.
+        Query min/max/max_count over active bucket + historical time range.
 
         Args:
             num_buckets: Number of bucket time spans to look back (0 = active only)
@@ -144,11 +150,8 @@ class BucketedSlidingAggregator:
                         Empty buckets (gaps) are naturally ignored
 
         Returns:
-            (min_value, max_value, direction, max_count) tuple where max_count is the
-            maximum count from any bucket (or active window) in the range. The direction
-            field is a signed delta between the newer and older extreme and is only
-            populated when num_buckets == 0 (active bucket only). For historical queries,
-            direction is None.
+            (min_value, max_value, max_count) tuple where max_count is the
+            maximum count from any bucket (or active window) in the range.
 
         Raises:
             ValueError: If num_buckets is negative
@@ -156,20 +159,19 @@ class BucketedSlidingAggregator:
 
         Examples:
             # Active bucket only
-            min_val, max_val, direction, max_count = agg.query_min_max(0)
+            min_val, max_val, max_count = agg.query_min_max(0)
 
             # Last hour (60 one-minute buckets)
-            min_val, max_val, direction, max_count = agg.query_min_max(60)
+            min_val, max_val, max_count = agg.query_min_max(60)
+
+        Note:
+            For direction information on the active bucket, use get_active_direction().
         """
         if num_buckets < 0:
             raise ValueError("num_buckets must be non-negative")
 
         # Start with active window min/max/count
-        min_value, min_ts, max_value, max_ts, max_count = self._get_active_window_stats()
-        direction: Optional[float] = None
-
-        if num_buckets == 0 and min_value != inf and max_value != -inf:
-            direction = self._compute_direction(min_value, min_ts, max_value, max_ts)
+        min_value, _, max_value, _, max_count = self._get_active_window_stats()
 
         # Add historical buckets if requested
         if num_buckets > 0:
@@ -177,42 +179,72 @@ class BucketedSlidingAggregator:
             min_value = min(min_value, hist_min)
             max_value = max(max_value, hist_max)
             max_count = max(max_count, hist_max_count)
-            direction = None  # Historical queries do not preserve direction
 
         # Check if we found any data
-        if min_value == inf:
+        if min_value == DECIMAL_POS_INF:
             raise LookupError("window is empty")
 
-        # TODO to make return consistent, don't return dirrection, but use
-        # active_direction()
-        return min_value, max_value, direction, max_count
+        return min_value, max_value, max_count
+
+    @property
+    def buckets_count(self) -> int:
+        return len(self._buckets)
+
+    def get_active_direction(self) -> Decimal:
+        """
+        Get direction for the current active bucket only.
+
+        The direction is a signed delta between the newer and older extremum:
+        - Positive value: most recent extreme is higher (rising trend)
+        - Negative value: most recent extreme is lower (falling trend)
+        - Zero: no clear directional movement
+
+        Returns:
+            Signed delta between newer and older extremum
+
+        Raises:
+            LookupError: If the active window is empty
+
+        Examples:
+            # Get direction for active bucket
+            direction = agg.get_active_direction()
+            if direction > 0:
+                print("Price trending upward")
+            elif direction < 0:
+                print("Price trending downward")
+        """
+        min_value, min_ts, max_value, max_ts, _ = self._get_active_window_stats()
+
+        if min_value == DECIMAL_POS_INF or max_value == DECIMAL_NEG_INF:
+            raise LookupError("active window is empty")
+
+        return self._compute_direction(min_value, min_ts, max_value, max_ts)
 
     # ========================================================================
     # Active Window Management
     # ========================================================================
 
-    def _get_active_window_stats(self) -> tuple[float, Optional[datetime], float, Optional[datetime], int]:
+    def _get_active_window_stats(
+        self,
+    ) -> tuple[Decimal, Optional[datetime], Decimal, Optional[datetime], int]:
         """
-        Get min/max/count from active window.
-        TODO too cumbersome, just need the direction
+        Get min/max/timestamps/count from active window.
 
         Returns:
             (min_value, min_timestamp, max_value, max_timestamp, count)
             or (inf, None, -inf, None, 0) if empty
+
+        Note:
+            This method returns timestamps to enable direction calculation.
+            For simple min/max queries without direction, timestamps can be ignored.
         """
         try:
             min_point = self._active_window.current_min()
             max_point = self._active_window.current_max()
             count = len(self._active_window._points)
-            return (
-                float(min_point.value),
-                min_point.timestamp,
-                float(max_point.value),
-                max_point.timestamp,
-                count,
-            )
+            return min_point.value, min_point.timestamp, max_point.value, max_point.timestamp, count
         except LookupError:
-            return inf, None, -inf, None, 0
+            return DECIMAL_POS_INF, None, DECIMAL_NEG_INF, None, 0
 
     def _condense_active_bucket(self) -> None:
         """
@@ -254,8 +286,8 @@ class BucketedSlidingAggregator:
         return Bucket(
             start=self._current_bucket_start,
             end=bucket_end,
-            min_value=float(self._active_window.current_min().value),
-            max_value=float(self._active_window.current_max().value),
+            min_value=self._active_window.current_min().value,
+            max_value=self._active_window.current_max().value,
             count=len(self._active_window._points),
         )
 
@@ -269,7 +301,7 @@ class BucketedSlidingAggregator:
     # Historical Bucket Queries
     # ========================================================================
 
-    def _query_historical_buckets(self, num_buckets: int) -> tuple[float, float, int]:
+    def _query_historical_buckets(self, num_buckets: int) -> tuple[Decimal, Decimal, int]:
         """
         Query min/max/max_count from historical buckets using segment tree.
 
@@ -280,7 +312,7 @@ class BucketedSlidingAggregator:
             (min_value, max_value, max_count) or (inf, -inf, 0) if no data
         """
         if not self._buckets or self._current_bucket_start is None:
-            return inf, -inf, 0
+            return DECIMAL_POS_INF, DECIMAL_NEG_INF, 0
 
         # Lazy rebuild segment tree if needed
         self._rebuild_tree_if_dirty()
@@ -290,7 +322,7 @@ class BucketedSlidingAggregator:
         left_idx = self._find_first_bucket_in_range(lookback_start)
 
         if left_idx == -1 or self._segment_tree is None:
-            return inf, -inf, 0
+            return DECIMAL_POS_INF, DECIMAL_NEG_INF, 0
 
         # Query segment tree for O(log n) min/max/max_count
         right_idx = len(self._buckets) - 1
@@ -381,11 +413,11 @@ class BucketedSlidingAggregator:
 
     @staticmethod
     def _compute_direction(
-        min_value: float,
+        min_value: Decimal,
         min_timestamp: Optional[datetime],
-        max_value: float,
+        max_value: Decimal,
         max_timestamp: Optional[datetime],
-    ) -> float:
+    ) -> Decimal:
         """
         Compute the signed delta between the newer and older extremum.
 
@@ -393,7 +425,7 @@ class BucketedSlidingAggregator:
         earlier one (rising), while a negative value indicates a drop.
         """
         if min_timestamp is None or max_timestamp is None:
-            return 0.0
+            return Decimal(0)
         if min_timestamp <= max_timestamp:
             return max_value - min_value
         return min_value - max_value
