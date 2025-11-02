@@ -183,6 +183,8 @@ class BucketedSlidingAggregator:
         if min_value == inf:
             raise LookupError("window is empty")
 
+        # TODO to make return consistent, don't return dirrection, but use
+        # active_direction()
         return min_value, max_value, direction, max_count
 
     # ========================================================================
@@ -192,6 +194,7 @@ class BucketedSlidingAggregator:
     def _get_active_window_stats(self) -> tuple[float, Optional[datetime], float, Optional[datetime], int]:
         """
         Get min/max/count from active window.
+        TODO too cumbersome, just need the direction
 
         Returns:
             (min_value, min_timestamp, max_value, max_timestamp, count)

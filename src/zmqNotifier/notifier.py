@@ -1,80 +1,175 @@
 """
 Notification system for market alerts and monitoring.
+Detects unusual short-term price movement and trade activity for a symbol
 
 Volatility measures ticks counts (activity of trades) and price fluctuations over
 short window.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from decimal import Decimal
 import logging
-from typing import List
 
 from dataclasses import dataclass
 from zmqNotifier.tick_agg import BucketedSlidingAggregator
 from zmqNotifier.models import TickData
+from zmqNotifier.market_data import get_timeframe_minutes
+from zmqNotifier.config import AppSettings, get_settings
 
 logger = logging.getLogger(__name__)
 
 
 class VolatilityNotifier:
     """
-    Detects unusual short-term price movement and trade activity for a symbol
 
     This Notifier as manager, stream the ticks of a given symbol to aggregators. Given a
     thresholds of max-min (volatility) and tick counts (activity),
     it notifies when the thresholds are exceeded. There is cooldown in the length of small window
 
-    on_tick(): Ingests ticks and drive SymbolTracks
+    on_tick(): Ingests ticks and drive SymbolTracks, notificiation manager's flush()
     """
 
+    def __init__(self, config: AppSettings | None = None):
+        self.config = config or get_settings()
+        self._trackers: dict[str, SymbolTracker] = {}
+        # Initialize trackers for all configured symbols
+        for symbol in self.config.notifier.symbols.keys():
+            self._trackers[symbol] = SymbolTracker(symbol, self)
 
-    def __init__(self):
-        # a symbol host a list of aggregators, if the xxxx_threshold is defined in settings
-        self.config = {}
-        # read from settings for each symbol and create SymbolTrackers for them
+    def on_tick(self, symbol: str, tick: TickData):
+        tracker = self._trackers.get(symbol)
+        if tracker is None:
+            logger.warning("No tracker configured for symbol %s", symbol)
+            return
 
-    def on_tick(self, symbol, tick:TickData):
-        # all symbol trackers on_tick(), which also calculate and eqnueue message
-        # ask notify_manager to flush()
-        pass
+        tracker.on_tick(tick)
+        notify_manager.flush()
 
-    def update_config(self, config):
+    def update_config(self, config: AppSettings):
         """
-        Redefine all sybmols and respective TFs with thresholds to monitor.
-        Allow add/delete aggregators per symbol/TF.
-        But aggregators doesn't keep thresmod, it just asks from config
+        Update notifier configuration and sync trackers/aggregators.
+
+        This is an idempotent operation that replaces the entire symbol configuration:
+        - Removes trackers for symbols no longer in config
+        - Creates trackers for newly added symbols
+        - For existing symbols, syncs timeframes (add/remove aggregators as needed)
+        - Threshold updates take effect immediately (no restart needed)
+
+        Args:
+            config: New AppSettings instance with updated notifier.symbols
+
+        Design notes:
+            - Aggregators don't store thresholds; they query config each time
+            - Existing aggregator history is preserved when timeframes remain
+            - Cooldown state is preserved for existing timeframes
+            - New aggregators start with empty history and reset cooldown
         """
-        # CRUD aggregators for symbols, make idempotent update, not nested merging if not exist
-        # therefore,
-        # if a symbol/tf is removed from config, remove the aggregator
-        # if a symbol/tf is added, create the aggregator
-        # if a symbol/tf exist, update the thresholds
-        #
-        # read
-        pass
+        self.config = config
+
+        current_symbols = set(self._trackers.keys())
+        new_symbols = set(self.config.notifier.symbols.keys())
+
+        symbols_to_remove = self._remove_stale_trackers(current_symbols, new_symbols)
+        symbols_to_add = self._add_new_trackers(current_symbols, new_symbols)
+        symbols_to_update = current_symbols & new_symbols
+        self._sync_existing_trackers(symbols_to_update)
+
+        logger.info(
+            "Config update complete: %d symbols tracked (%d added, %d removed, %d updated)",
+            len(self._trackers),
+            len(symbols_to_add),
+            len(symbols_to_remove),
+            len(symbols_to_update),
+        )
+
+    def _remove_stale_trackers(
+        self, current_symbols: set[str], new_symbols: set[str]
+    ) -> set[str]:
+        symbols_to_remove = current_symbols - new_symbols
+
+        for symbol in symbols_to_remove:
+            logger.info("Removing tracker for symbol %s (no longer in config)", symbol)
+            del self._trackers[symbol]
+
+        return symbols_to_remove
+
+    def _add_new_trackers(self, current_symbols: set[str], new_symbols: set[str]) -> set[str]:
+        symbols_to_add = new_symbols - current_symbols
+
+        for symbol in symbols_to_add:
+            logger.info("Adding tracker for new symbol %s", symbol)
+            self._trackers[symbol] = SymbolTracker(symbol, self)
+
+        return symbols_to_add
+
+    def _sync_existing_trackers(self, symbols: set[str]) -> None:
+        for symbol in symbols:
+            tracker = self._trackers[symbol]
+            thresholds = self.config.notifier.thresholds_for(symbol)
+
+            if thresholds is None:
+                logger.warning("Symbol %s has no thresholds, removing all aggregators", symbol)
+                for tf in list(tracker._aggregators.keys()):
+                    tracker.remove_agg(tf)
+                continue
+
+            desired_tfs = set(thresholds.keys())
+            current_tfs = set(tracker._aggregators.keys())
+
+            tfs_to_remove = current_tfs - desired_tfs
+            for tf in tfs_to_remove:
+                logger.info("Removing aggregator for %s/%s (no longer in config)", symbol, tf)
+                tracker.remove_agg(tf)
+
+            tfs_to_add = desired_tfs - current_tfs
+            for tf in tfs_to_add:
+                logger.info("Adding aggregator for %s/%s (new in config)", symbol, tf)
+                tracker.add_agg(tf)
+
+            # Existing timeframes keep their aggregator history and cooldown state
+            # Threshold updates take effect immediately on next _calculate() call
 
 
 @dataclass
-class Scores:
+class AggStates:
     """
-    score vector, each element own cooldown and escalation value respectively
+    Aggregator state tracking for a symbol/timeframe combination.
 
-    e.g. a tick comes, TF M1, volatility score (v) escalates to 1 (V), enqueue message
-    after some ticks comes, activity score (a) escalates to 1 (A), enqueue message
-    no message is enqueue for each esacled value of a/v. and cooldown of a/v is reset by
-    each tick that less than 0<a/v
-    if no further escalation, after cooldown period, the a/v score is reduced by 1, until 0
+    Tracks both current measurements and notification state:
+    - Current volatility (pip_change) and activity (volume/tick count)
+    - Calculated scores based on threshold exceedance
+    - Cooldown timestamps to prevent notification spam
+    - Escalation tracking for higher-severity alerts
+
+    Notification Logic:
+    - When a tick arrives and TF M1 volatility score (v) escalates to 1 (V), enqueue message
+    - After more ticks, if activity score (a) escalates to 1 (A), enqueue message
+    - No duplicate messages for same escalation level during cooldown
+    - Cooldown of a/v is reset by each tick that brings score below threshold (0 < a/v)
+    - If no further escalation after cooldown period, the a/v score reduces by 1 until 0
+
+    The direction field indicates price movement direction ("UP" or "DOWN").
     """
+
     symbol: str
     timeframe: str
-    volatility_score: int
-    activity_score: int
     direction: str  # "UP" or "DOWN"
     pip_change: int
     volume: int
+    volatility_score: int = 0
+    activity_score: int = 0
+    last_volatility_notification: int = -99999  # Timestamp (seconds since epoch)
+    last_activity_notification: int = -99999
 
-    def mangnitude(self) -> int:
-        return self.volatility_score * (self.activity_score+1)
+    def magnitude(self) -> int:
+        """
+        Calculate combined magnitude of volatility and activity scores.
+
+        Returns a weighted score where volatility is amplified by activity level.
+        Higher magnitude indicates more urgent notification priority.
+        """
+        return self.volatility_score * (self.activity_score + 1)
+
 
 class SymbolTracker:
     """
@@ -107,40 +202,156 @@ class SymbolTracker:
     7. aggregators should store enough history buckets like 30
     """
 
+    def __init__(self, symbol: str, master: "VolatilityNotifier"):
+        """
+        Initialize a SymbolTracker for the given symbol.
 
-    def __init__(self, symbol: str, master):
+        Args:
+            symbol: Trading symbol (e.g., 'EURUSD', 'BTCUSD')
+            master: Reference to VolatilityNotifier to access config and notification manager
+
+        The initializer:
+        1. Reads threshold and tracker config from master
+        2. Creates BucketedSlidingAggregator for each configured timeframe
+        3. Initializes per-timeframe cooldown tracking
+        """
         self._symbol = symbol
         self._master = master
         self._aggregators: dict[str, BucketedSlidingAggregator] = {}
 
-    def on_tick(self, tick:TickData):
-        # feed tick to each aggregator
-        pass
+        # Get configuration from master
+        thresholds = self.thresholds
+        if thresholds is None:
+            logger.warning("No thresholds configured for symbol %s", symbol)
+            return
 
-    def _calculate(self):
-        # calculate the volatility and activity scores from master's config thresholds
-        pass
+        # Create aggregators for each timeframe that has thresholds defined
+        # thresholds is now a dict[str, tuple[int, int]] where key is timeframe
+        configured_timeframes = set(thresholds.keys())
 
-    def add_agg(self, tf):
-        # add a BucketedSlidingAggregator for the timeframe tf
-        pass
+        for tf in configured_timeframes:
+            self.add_agg(tf)
 
-    def remove_agg(self, tf):
-        # add a BucketedSlidingAggregator for the timeframe tf
-        pass
+        logger.info(
+            "SymbolTracker initialized for %s with timeframes: %s",
+            symbol,
+            list(self._aggregators.keys()),
+        )
+
+    def on_tick(self, tick: TickData):
+        if not self._aggregators:
+            return
+
+        mid_price = float((tick.bid + tick.ask) / 2)
+
+        # Feed to all aggregators
+        for agg in self._aggregators.values():
+            agg.add(tick.datetime, mid_price)
+
+    def _calculate(self, timestamp: datetime) -> None:
+        """
+        Calculate volatility and activity scores across all timeframes.
+
+        Compares current aggregator metrics against configured thresholds,
+        applies cooldown logic, and returns AggStates if notification warranted.
+
+        Args:
+            timestamp: Current tick timestamp for cooldown checking
+
+        Returns:
+            AggStates object if any threshold exceeded, None otherwise
+
+        Scoring Logic:
+            - Volatility score: log2(pip_change / threshold) rounded up
+            - Activity score: log2(tick_count / threshold) rounded up
+            - Both scores capped at 0 minimum
+            - Cooldown prevents repeated notifications within cooldown_unit × timeframe
+            - Escalation: Higher scores can break through active cooldown
+        """
+
+        thresholds = self.thresholds
+        if not thresholds:
+            return
+
+        tracker_config = self.tracker
+        current_time = timestamp.timestamp()
+
+    def _get_timeframe_seconds(self, tf: str) -> float:
+        """Convert timeframe code to seconds."""
+        from zmqNotifier.market_data import get_timeframe_minutes
+
+        return get_timeframe_minutes(tf) * 60
+
+    def add_agg(self, tf: str):
+        if tf in self._aggregators:
+            logger.debug("Aggregator for %s/%s already exists", self._symbol, tf)
+            return
+
+        tracker_config = self.tracker
+
+        # Convert timeframe to timedelta for bucket_span
+        tf_minutes = get_timeframe_minutes(tf)
+        bucket_span = timedelta(minutes=tf_minutes)
+
+        # Determine max_window (number of buckets to retain)
+        max_window = None
+        if tracker_config.num_bucket_retention:
+            max_window = tracker_config.num_bucket_retention.get(tf)
+
+        # Create aggregator
+        self._aggregators[tf] = BucketedSlidingAggregator(
+            bucket_span=bucket_span, max_window=max_window
+        )
+
+        logger.debug(
+            "Added aggregator for %s/%s with bucket_span=%s, max_window=%s",
+            self._symbol,
+            tf,
+            bucket_span,
+            max_window,
+        )
+
+    def remove_agg(self, tf: str):
+        """
+        Remove the BucketedSlidingAggregator for the given timeframe.
+
+        Args:
+            tf: Timeframe code (e.g., 'M1', 'M5', 'M30')
+        """
+        if tf not in self._aggregators:
+            logger.debug("No aggregator found for %s/%s to remove", self._symbol, tf)
+            return
+
+        del self._aggregators[tf]
+
+        logger.debug("Removed aggregator for %s/%s", self._symbol, tf)
+
+    @property
+    def thresholds(self):
+        return self._master.config.notifier.thresholds_for(self._symbol)
+
+    @property
+    def tracker(self):
+        return self._master.config.notifier.resolve_tracker_config(self._symbol)
 
 
 class NotificationManager:
     """
-    Itself is a threaded work that keeps cooldown/escalating state per symbol/timeframe
-    members:
-      1. TelegramNotifier backend instance
-        * if pririty queue is not empty, send message batch every 15 seconds
-      2. priority queue of pending messages, in priorty weight of (volatility_score +
-      activity_score), and larger TF is higher priority, needs a M5, H1 parser struct to
-      timedelta already has timespan order, larger timespan, larger priority weight
-      4. Batches alert summaries so recipients are not flooded with individual tick events.
+    Manages notification queuing, batching, and delivery for market alerts.
+
+    Runs as a threaded worker that:
+    1. Maintains a TelegramNotifier backend instance
+       - Sends message batches every 15 seconds if priority queue is not empty
+    2. Manages a priority queue of pending AggStates messages
+       - Priority weight based on magnitude (volatility_score * (activity_score + 1))
+       - Larger timeframes (H1 > M5 > M1) get higher priority
+       - timedelta ordering provides natural priority: larger timespan = higher priority
+    3. Batches alert summaries to prevent flooding recipients with individual tick events
+
+    The manager ensures notifications are sent efficiently while respecting cooldown
+    and escalation logic defined in AggStates.
     """
+
     FLUSH_INTERVAL = timedelta(seconds=15)
 
     def __init__(self):
@@ -149,14 +360,23 @@ class NotificationManager:
         # initialize time for flush
         pass
 
-    def enqueue(self,score):
+    def enqueue(self, state: AggStates):
+        """
+        Add an AggStates notification to the priority queue.
+
+        Args:
+            state: AggStates containing symbol, timeframe, scores, and notification timestamps
+        """
         pass
 
     def _format_batch_summary(self):
         """
-        scores first, then an (ordered) dict add symbol and format as the message
+        Format queued AggStates into a batched summary message.
 
-        example:
+        Groups states by symbol, orders by priority (magnitude and timeframe),
+        and formats as a concise alert message.
+
+        Example output:
 
         BTCUSD UP !! GBPUSD UP !!!
 
@@ -168,10 +388,11 @@ class NotificationManager:
         """
         pass
 
-    def _flush(self):
+    def flush(self):
         # compile batch msg
         # telegram send batch
         # let _flush() be driven by tick events
         pass
+
 
 notify_manager = NotificationManager()

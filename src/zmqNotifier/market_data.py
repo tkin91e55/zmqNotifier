@@ -30,19 +30,6 @@ class SameOHLCError(Exception):
 
 FLAT_BAR_THRESHOLD = 30
 
-# Timeframe code to minutes mapping
-TIMEFRAME_MINUTES = {
-    "M1": 1,
-    "M5": 5,
-    "M15": 15,
-    "M30": 30,
-    "H1": 60,
-    "H4": 240,
-    "D1": 1440,
-    "W1": 10080,
-    "MN": 43200,
-}
-
 
 class MarketDataHandler:
     """
@@ -273,6 +260,12 @@ class MarketDataHandler:
         if self._flat_bar_counts[key] > FLAT_BAR_THRESHOLD:
             raise SameOHLCError(symbol, timeframe, self._flat_bar_counts[key], ohlc)
 
+# Timeframe code to minutes mapping
+# TODO such is globally used, put into zmqNotifier __init__.py instead
+TIMEFRAME_MINUTES = {
+    "M1": 1, "M5": 5, "M15": 15, "M30": 30, "H1": 60,
+    "H4": 240, "D1": 1440, "W1": 10080, "MN": 43200,
+}
 
 def get_timeframe_minutes(timeframe: str) -> int:
     if timeframe not in TIMEFRAME_MINUTES:
