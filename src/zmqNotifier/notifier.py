@@ -9,10 +9,11 @@ short window.
 from datetime import datetime, timedelta
 from decimal import Decimal
 import logging
+import math
 
 from dataclasses import dataclass
 from zmqNotifier.tick_agg import BucketedSlidingAggregator
-from zmqNotifier.models import TickData
+from zmqNotifier.models import TickData, into_pip
 from zmqNotifier.market_data import get_timeframe_minutes
 from zmqNotifier.config import AppSettings, get_settings, SymbolTrackerConfig
 
@@ -82,9 +83,7 @@ class VolatilityNotifier:
             len(symbols_to_update),
         )
 
-    def _remove_stale_trackers(
-        self, current_symbols: set[str], new_symbols: set[str]
-    ) -> set[str]:
+    def _remove_stale_trackers(self, current_symbols: set[str], new_symbols: set[str]) -> set[str]:
         symbols_to_remove = current_symbols - new_symbols
 
         for symbol in symbols_to_remove:
@@ -272,17 +271,58 @@ class SymbolTracker:
             return
 
         tracker_config = self.tracker
+        current_timestamp = int(now.timestamp())
+        cooldown_unit = tracker_config.cooldown_unit
+        min_buckets = tracker_config.min_buckets_calculation
+
         for tf, agg in self._aggregators.items():
             state = self._agg_states[tf]
             vol_threshold, act_threshold = thresholds.get(tf, (None, None))
             if vol_threshold is None or act_threshold is None:
                 continue
-            if agg.buckets_count < tracker_config.min_buckets_calculation: continue
+            if agg.buckets_count < min_buckets:
+                continue
 
             # Get current measures
-            _min, _max , _cnt = agg.query_min_max()
-            pip_change = (_max - _min)
+            _min, _max, tick_cnt = agg.query_min_max()
+            price_change = _max - _min
+            # Convert price difference to pips using symbol-specific multiplier
+            pip_change = into_pip(price_change)
 
+            # Calculate scores using log2
+            # Score = floor(log2(current / threshold)), minimum 0
+            volatility_score = (
+                max(0, math.floor(math.log2(pip_change / vol_threshold)))
+                if pip_change >= vol_threshold
+                else 0
+            )
+            # Check if either score triggers notification
+            if volatility_score == 0:
+                continue
+
+            # Cooldown logic with escalation
+            cooldown_seconds = cooldown_unit * self._get_timeframe_seconds(tf)
+
+            # Check volatility notification
+            if volatility_score > 0:
+                time_since_last = current_timestamp - state.last_volatility_notification
+                # Notify if: no prior notification, cooldown expired, or score escalated
+                if (
+                    state.last_volatility_notification == -99999
+                    or time_since_last >= cooldown_seconds
+                    or volatility_score > state.volatility_score
+                ):
+                    state.volatility_score = volatility_score
+                    state.last_volatility_notification = current_timestamp
+                    # TODO: Enqueue to NotificationManager
+                    logger.info(
+                        "Volatility alert: %s %s V%d (pip_change=%d, threshold=%d)",
+                        self._symbol,
+                        tf,
+                        volatility_score,
+                        pip_change,
+                        vol_threshold,
+                    )
 
     def _get_timeframe_seconds(self, tf: str) -> float:
         """Convert timeframe code to seconds."""
@@ -306,7 +346,6 @@ class SymbolTracker:
         if tracker_config.num_bucket_retention:
             max_window = tracker_config.num_bucket_retention.get(tf)
 
-        # Create aggregator
         self._aggregators[tf] = BucketedSlidingAggregator(
             bucket_span=bucket_span, max_window=max_window
         )

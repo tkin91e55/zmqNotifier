@@ -1,4 +1,17 @@
-"""Pydantic models for data validation and type safety."""
+"""
+Pydantic models for data validation and type safety.
+
+| Symbol | price    | Symbol | price    | Symbol | price    | Symbol | price    |
+| :---   | :---     | :---   | :---     | :---   | :---     | :---   | :---     |
+| USDCAD | 1.40130  | AUDUSD | 0.65408  | EURUSD | 1.15370  | GBPUSD | 1.31476  |
+| NZDUSD | 0.57132  | USDCHF | 0.80459  | USDJPY | 154.015  | EURAUD | 1.76213  |
+| EURCAD | 1.61585  | EURCHF | 0.92725  | EURGBP | 0.87720  | EURJPY | 177.616  |
+| EURNZD | 2.01384  | GBPAUD | 2.00696  | GBPCAD | 1.84157  | GBPCHF | 1.05649  |
+| GBPJPY | 202.336  | GBPNZD | 2.29579  | AUDCAD | 0.91581  | AUDCHF | 0.52578  |
+| AUDJPY | 100.676  | AUDNZD | 1.14202  | NZDCAD | 0.80049  | NZDCHF | 0.45899  |
+| NZDJPY | 87.958   | CADCHF | 0.57318  | CADJPY | 109.818  | CHFJPY | 191.266  |
+| BTCUSD | 110043.50| XAUUSD | 4002.25  | USOUSD | 61.106   |
+"""
 
 from datetime import datetime
 from decimal import Decimal
@@ -7,6 +20,14 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic import field_serializer
 from pydantic import field_validator
+
+
+def into_pip(price_diff: Decimal) -> int:
+    """Get the second last decimal place multiplier for pipstep calculation."""
+    num_decimal_places = abs(int(price_diff.as_tuple().exponent))
+    if num_decimal_places > 0:
+        return price_diff * 10 ** (num_decimal_places - 1)
+    return int(price_diff) // 10
 
 
 class TickData(BaseModel):
@@ -77,6 +98,7 @@ class OHLCData(BaseModel):
             msg = "Low must be <= close"
             raise ValueError(msg)
         return v
+
 
 class MarketDataMessage(BaseModel):
     """Wrapper for incoming market data messages."""

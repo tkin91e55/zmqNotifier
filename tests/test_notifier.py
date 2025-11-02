@@ -446,19 +446,13 @@ class TestAggStates:
 
     def test_magnitude_calculation(self):
         """magnitude should correctly calculate combined score."""
-        state = AggStates(
-            volatility_score=2,
-            activity_score=1,
-        )
+        state = AggStates(volatility_score=2, activity_score=1)
         # magnitude = volatility_score * (activity_score + 1) = 2 * (1 + 1) = 4
         assert state.magnitude() == 4
 
     def test_magnitude_zero_activity(self):
         """magnitude should handle zero activity score."""
-        state = AggStates(
-            volatility_score=3,
-            activity_score=0,
-        )
+        state = AggStates(volatility_score=3, activity_score=0)
         # magnitude = 3 * (0 + 1) = 3
         assert state.magnitude() == 3
 
@@ -512,13 +506,193 @@ class TestSymbolTrackerOnTick:
         )
         tracker.on_tick(tick)
 
-    def test_calculate_no_thresholds(self, minimal_config):
-        """_calculate should return None if no thresholds configured."""
-        notifier = VolatilityNotifier(config=AppSettings())
-        tracker = SymbolTracker("EURUSD", notifier)
+    def test_cooldown_prevents_duplicate_notifications(self, tracker_with_config, caplog):
+        """Cooldown should prevent duplicate notifications for same score."""
+        tracker = tracker_with_config
+        base = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
 
-        score = tracker._calculate(datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC))
-        assert score is None
+        # Create sufficient history
+        for i in range(35):
+            bucket_start = base + timedelta(minutes=i)
+            tracker.on_tick(
+                TickData(datetime=bucket_start, bid=Decimal("1.1000"), ask=Decimal("1.1001"))
+            )
+
+        caplog.clear()
+
+        # First alert - should notify (20 pips = 2x threshold)
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=35), bid=Decimal("1.1000"), ask=Decimal("1.1001")
+            )
+        )
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=35, seconds=1),
+                bid=Decimal("1.1200"),
+                ask=Decimal("1.1201"),
+            )
+        )
+
+        assert caplog.text.count("Volatility alert") == 1
+        first_notification_time = tracker._agg_states["M1"].last_volatility_notification
+
+        caplog.clear()
+
+        # Second alert within cooldown (same score) - should NOT notify
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=35, seconds=30),
+                bid=Decimal("1.1000"),
+                ask=Decimal("1.1001"),
+            )
+        )
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=35, seconds=31),
+                bid=Decimal("1.1200"),
+                ask=Decimal("1.1201"),
+            )
+        )
+
+        assert "Volatility alert" not in caplog.text
+        assert tracker._agg_states["M1"].last_volatility_notification == first_notification_time
+
+    def test_escalation_breaks_cooldown(self, tracker_with_config, caplog):
+        """Higher score should break through active cooldown."""
+        tracker = tracker_with_config
+        base = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+        # Create sufficient history
+        for i in range(35):
+            bucket_start = base + timedelta(minutes=i)
+            tracker.on_tick(
+                TickData(datetime=bucket_start, bid=Decimal("1.1000"), ask=Decimal("1.1001"))
+            )
+
+        caplog.clear()
+
+        # First alert with score 1 (20 pips = 2x threshold)
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=35),
+                bid=Decimal("1.10000"),
+                ask=Decimal("1.10001"),
+            )
+        )
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=35, seconds=1),
+                bid=Decimal("1.10020"),
+                ask=Decimal("1.10021"),
+            )
+        )
+
+        assert tracker._agg_states["M1"].volatility_score == 1
+        assert caplog.text.count("Volatility alert") == 1
+
+        caplog.clear()
+
+        # Escalated alert with score 2 within cooldown - should notify (40 pips = 4x threshold)
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=35, seconds=2),
+                bid=Decimal("1.10000"),
+                ask=Decimal("1.10001"),
+            )
+        )
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=35, seconds=3),
+                bid=Decimal("1.10040"),
+                ask=Decimal("1.10041"),
+            )
+        )
+
+        assert tracker._agg_states["M1"].volatility_score == 2
+        assert caplog.text.count("Volatility alert") == 1
+
+    def test_cooldown_expires_allows_renotification(self, tracker_with_config, caplog):
+        """After cooldown expires, same score should trigger new notification."""
+        tracker = tracker_with_config
+        base = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+        # Create sufficient history
+        for i in range(35):
+            bucket_start = base + timedelta(minutes=i)
+            tracker.on_tick(
+                TickData(datetime=bucket_start, bid=Decimal("1.1000"), ask=Decimal("1.1001"))
+            )
+
+        caplog.clear()
+
+        # First alert (20 pips = 2x threshold)
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=35), bid=Decimal("1.1000"), ask=Decimal("1.1001")
+            )
+        )
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=35, seconds=1),
+                bid=Decimal("1.1200"),
+                ask=Decimal("1.1201"),
+            )
+        )
+
+        assert caplog.text.count("Volatility alert") == 1
+
+        caplog.clear()
+
+        # Alert after cooldown expired (cooldown_unit=1, timeframe=1min = 60s cooldown)
+        # Wait 61 seconds (20 pips = 2x threshold)
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=36, seconds=2),
+                bid=Decimal("1.1000"),
+                ask=Decimal("1.1001"),
+            )
+        )
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=36, seconds=3),
+                bid=Decimal("1.1200"),
+                ask=Decimal("1.1201"),
+            )
+        )
+
+        assert caplog.text.count("Volatility alert") == 1
+
+    def test_insufficient_history_no_scoring(self, tracker_with_config):
+        """Insufficient bucket history should prevent scoring."""
+        tracker = tracker_with_config
+        base = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+        # Add only 5 buckets (< min_buckets_calculation default of 30)
+        for i in range(5):
+            bucket_start = base + timedelta(minutes=i)
+            tracker.on_tick(
+                TickData(datetime=bucket_start, bid=Decimal("1.1000"), ask=Decimal("1.1001"))
+            )
+
+        # Try to trigger alert with high volatility
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=5), bid=Decimal("1.1000"), ask=Decimal("1.1001")
+            )
+        )
+        tracker.on_tick(
+            TickData(
+                datetime=base + timedelta(minutes=5, seconds=1),
+                bid=Decimal("1.1100"),
+                ask=Decimal("1.1101"),
+            )
+        )
+
+        state = tracker._agg_states["M1"]
+        # Should remain at initial values (no notification)
+        assert state.volatility_score == 0
+        assert state.last_volatility_notification == -99999
 
 
 class TestVolatilityNotifierOnTick:
